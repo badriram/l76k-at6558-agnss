@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * casic_agnss: assisted cold starts for CASIC GNSS receivers (Quectel L76K and other AT6558-based
  * modules). Portable C99: no allocation, no OS, no stdio, byte order handled explicitly. Doubles

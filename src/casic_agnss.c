@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /* casic_agnss: see include/casic_agnss.h. MIT licence. */
 #include "casic_agnss.h"
 

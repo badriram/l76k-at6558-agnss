@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 from machine import Pin, UART
 import time
 en = Pin(34, Pin.OUT, value=0)      # active low: GNSS power on

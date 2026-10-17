@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /* Host tests for casic_agnss. Expected values come from Quectel's L76K protocol specification
  * (worked examples) or were computed independently. All positions are made up. */
 #include "casic_agnss.h"

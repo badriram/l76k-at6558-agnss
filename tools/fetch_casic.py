@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """Fetch CASIC's AGNSS file (as republished by Espruino), check it, and write the raw CASIC frames.
 
     python3 tools/fetch_casic.py casic.bin

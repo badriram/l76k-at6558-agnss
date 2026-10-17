@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # Assisted cold starts on a Quectel L76K (CASIC / AT6558), on a Heltec WiFi LoRa 32 V4 (MicroPython).
 # Takes a first fix, then cold-restarts the receiver ($PCAS10,2) again and again: with no help, with
 # AID-INI (time and position from that first fix, held in memory only), with CASIC's AGNSS orbit data

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * The assisted cold start, written against four platform hooks so it ports anywhere. Fill in the
  * hooks for your board (UART at 9600 baud to the receiver, a millisecond clock, a sleep). With
