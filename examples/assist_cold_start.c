@@ -138,7 +138,7 @@ void plat_sleep_ms(uint32_t ms) { fake_ms += ms; }
 
 int main(void)
 {
-    /* A one-frame stand-in for CASIC's file; fetch the real one with tools/fetch_casic.py. */
+    /* A one-frame stand-in for CASIC's file; fetch the real one with tools/fetch_agnss.py. */
     uint8_t agnss[100], eph[72] = {0};
     size_t n = casic_frame(CASIC_CLS_MSG, CASIC_ID_MSG_GPSEPH, eph, sizeof eph, agnss, sizeof agnss);
     unsigned s = casic_assisted_cold_start((int64_t)time(NULL), 0.0, 0.0, 0.0, agnss, n, 2);

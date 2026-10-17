@@ -145,6 +145,60 @@ static void test_agnss_file(void)
     CHECK(casic_frame_next(buf, len, &off, &f) == -1);
 }
 
+/* GPS PRN 8, toe 597600 s of week 2440: one record from IGS broadcast RINEX (BKG, 2026-10-17)
+ * and the same satellite's MSG-GPSEPH payload in CASIC's AGNSS file, fetched the same evening. */
+static const uint8_t casic_g08[72] = {
+    0x95, 0x2a, 0xca, 0xab, 0xc1, 0x4f, 0x0e, 0xa1, 0xe0, 0xdb, 0x25, 0x06, 0xf6, 0x3b, 0xa4, 0x16,
+    0x63, 0x2b, 0xed, 0xfd, 0x06, 0x9f, 0x52, 0x26, 0xdb, 0x80, 0x6e, 0xac, 0x07, 0xa4, 0xff, 0xff,
+    0xa1, 0x37, 0xd0, 0xfb, 0x97, 0x05, 0x59, 0x0f, 0x0d, 0x1c, 0x4d, 0x06, 0x20, 0x00, 0x39, 0x00,
+    0xe6, 0x91, 0x88, 0x01, 0xe6, 0x91, 0x00, 0x00, 0xcd, 0x53, 0x0a, 0x00, 0x9c, 0xff, 0x00, 0x0a,
+    0x11, 0x00, 0x00, 0x00, 0x08, 0x03, 0x00, 0x00};
+
+static void rinex_g08(casic_gps_eph_t *e)
+{
+    memset(e, 0, sizeof *e);
+    e->af0 = 3.151656128466e-04; e->af1 = -1.136868377216e-11; e->af2 = 0.0;
+    e->iodc = 17; e->crs = 5.040625000000e+01; e->delta_n = 5.086283292686e-09; e->m0 = -5.089273876685e-02;
+    e->cuc = 2.665445208549e-06; e->e = 1.200759038329e-02; e->cus = 7.318332791328e-06; e->sqrt_a = 5.153788942337e+03;
+    e->toe = 5.976000000000e+05; e->cic = 5.960464477539e-08; e->omega0 = -2.051075803723e+00; e->cis = 1.061707735062e-07;
+    e->i0 = 9.405815259674e-01; e->crc = 2.244062500000e+02; e->omega = 5.557069962041e-01; e->omega_dot = -8.409278851647e-09;
+    e->idot = -3.828730910582e-10; e->week = 2440;
+    e->ura = casic_ura_index(2.0); e->health = 0; e->tgd = 4.656612873077e-09;
+    e->toc = e->toe;                                     /* RINEX epoch 22:00:00 Saturday */
+    e->svid = 8; e->valid = CASIC_GPSEPH_VALID;
+}
+
+static void test_gpseph(void)
+{
+    casic_gps_eph_t e, d;
+    uint8_t p[CASIC_GPSEPH_LEN], frame[100];
+    casic_frame_t f;
+    size_t n;
+
+    rinex_g08(&e);
+    CHECK(casic_gpseph_payload(&e, p) == 1);
+    /* Everything but the first four bytes, which CASIC fills with an undocumented value. */
+    CHECK(memcmp(p + 4, casic_g08 + 4, sizeof p - 4) == 0);
+    CHECK(p[0] == 0 && p[1] == 0 && p[2] == 0 && p[3] == 0);
+
+    n = casic_gpseph_frame(&e, frame, sizeof frame);
+    CHECK(n == 82 && casic_frame_parse(frame, n, &f) == 1 && f.cls == 0x08 && f.id == 0x07);
+
+    /* Decoding CASIC's bytes gives back the RINEX values, and re-encoding gives back the bytes. */
+    CHECK(casic_gpseph_decode(casic_g08, sizeof casic_g08, &d) == 1);
+    CHECK(d.svid == 8 && d.week == 392 && d.toe == 597600.0 && d.iodc == 17 && d.ura == 0);
+    CHECK(fabs(d.sqrt_a - e.sqrt_a) < 1e-6 && fabs(d.m0 - e.m0) < 1e-11 && fabs(d.omega0 - e.omega0) < 1e-11);
+    CHECK(casic_gpseph_payload(&d, p) == 1 && memcmp(p + 4, casic_g08 + 4, sizeof p - 4) == 0);
+
+    CHECK(casic_ura_index(2.8) == 1 && casic_ura_index(4.0) == 2 && casic_ura_index(32) == 7 &&
+          casic_ura_index(1e5) == 15);
+    e.svid = 33;                                         /* out of range */
+    CHECK(casic_gpseph_frame(&e, frame, sizeof frame) == 0);
+    rinex_g08(&e);
+    e.crs = 2000.0;                                      /* beyond 16 bits at 2^-5 m */
+    CHECK(casic_gpseph_payload(&e, p) == 0);
+}
+
 struct counts { int nmea, frames, gga, acks; };
 static void on_nmea(void *ctx, const char *s, size_t n)
 {
@@ -196,6 +250,7 @@ int main(void)
     test_gps_time_and_aid();
     test_nmea();
     test_agnss_file();
+    test_gpseph();
     test_stream();
     printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

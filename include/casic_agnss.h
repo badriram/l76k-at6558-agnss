@@ -110,6 +110,49 @@ void casic_aid_ini_payload(const casic_aid_ini_t *aid, uint8_t out[CASIC_AID_INI
 /* The whole AID-INI frame (66 bytes). Returns its length, or 0 if out_cap is too small. */
 size_t casic_aid_ini_frame(const casic_aid_ini_t *aid, uint8_t *out, size_t out_cap);
 
+/* ------------------------------------------------------------------ MSG-GPSEPH */
+
+/*
+ * One GPS satellite's broadcast ephemeris (LNAV), in the units RINEX navigation files use: angles
+ * in radians, rates in radians per second, so a RINEX record copies straight in. The encoder
+ * scales each field to the satellite's own broadcast resolution (IS-GPS-200), which is also what
+ * CASIC's 72-byte MSG-GPSEPH carries; values taken from RINEX therefore encode exactly. Checked
+ * field by field against CASIC's own AGNSS file: every orbit and clock term identical.
+ */
+typedef struct {
+    double sqrt_a;                       /* square root of the semi-major axis, m^1/2 */
+    double e;                            /* eccentricity */
+    double omega, m0, i0, omega0;        /* argument of perigee, mean anomaly, inclination, RAAN: rad */
+    double omega_dot, delta_n, idot;     /* rad/s */
+    double cuc, cus, cic, cis;           /* rad */
+    double crc, crs;                     /* m */
+    double toe, toc;                     /* ephemeris and clock reference times, seconds of GPS week */
+    double af0, af1, af2;                /* clock: s, s/s, s/s^2 */
+    double tgd;                          /* group delay, s */
+    uint16_t week;                       /* GPS week of toe; full or 10-bit, stored modulo 1024 */
+    uint16_t iodc;
+    uint8_t ura;                         /* URA index 0-15 (casic_ura_index converts from metres) */
+    uint8_t health;                      /* 0 = healthy */
+    uint8_t svid;                        /* PRN 1-32 */
+    uint8_t valid;                       /* 3 = usable, 2 = expired, 1 = unhealthy, 0 = invalid */
+} casic_gps_eph_t;
+
+#define CASIC_GPSEPH_LEN 72u
+#define CASIC_GPSEPH_VALID 3
+#define CASIC_GPS_PI 3.1415926535898     /* the value IS-GPS-200 defines semicircles with */
+
+/* The URA index for a RINEX "SV accuracy" in metres (IS-GPS-200 table 20-I). */
+uint8_t casic_ura_index(double metres);
+
+/* The 72-byte payload. Returns 1, or 0 if a field is out of its broadcast range. */
+int casic_gpseph_payload(const casic_gps_eph_t *eph, uint8_t out[CASIC_GPSEPH_LEN]);
+
+/* The whole frame (82 bytes). Returns its length, or 0 if out_cap is too small or a field is out of range. */
+size_t casic_gpseph_frame(const casic_gps_eph_t *eph, uint8_t *out, size_t out_cap);
+
+/* Decode a MSG-GPSEPH payload (from CASIC's file, say) back into physical units. Returns 1, or 0 if len is wrong. */
+int casic_gpseph_decode(const uint8_t *payload, uint16_t len, casic_gps_eph_t *eph);
+
 /* ------------------------------------------------------------------ NMEA */
 
 /*

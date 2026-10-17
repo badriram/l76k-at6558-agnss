@@ -37,12 +37,12 @@ More findings, all on the same receiver, in [`results/`](results/2026-10-17-helt
 
 | path | what |
 | --- | --- |
-| `include/casic_agnss.h`, `src/casic_agnss.c` | **the C library**: portable C99, no allocation, no OS, no stdio, byte order explicit. CASIC framing and checksum, AID-INI, CASIC AGNSS file parsing, CFG-MSG, ACK decoding, NMEA commands, a GGA/RMC parser, GPS time, and a stream splitter for the receiver's mixed NMEA-and-binary output |
+| `include/casic_agnss.h`, `src/casic_agnss.c` | **the C library**: portable C99, no allocation, no OS, no stdio, byte order explicit. CASIC framing and checksum, AID-INI, CASIC AGNSS file parsing, a MSG-GPSEPH encoder and decoder for RINEX-sourced ephemeris, CFG-MSG, ACK decoding, NMEA commands, a GGA/RMC parser, GPS time, and a stream splitter for the receiver's mixed NMEA-and-binary output |
 | `examples/assist_cold_start.c` | the assisted cold start against four platform hooks (UART write/read, milliseconds, sleep): fill them in for Zephyr, ESP-IDF, Arduino or anything else |
 | `tests/test_casic.c` | host tests (`make test`), against Quectel's worked examples and independently computed values |
 | `micropython/heltec_v4_l76k/assisted_cold_start.py` | the measurement above, on a Heltec WiFi LoRa 32 V4 with its L76K module; logs to `/gnss_assist_log.txt` on the board |
 | `micropython/heltec_v4_l76k/hello.py` | power the module and print its NMEA, to check the wiring |
-| `tools/fetch_casic.py` | fetch CASIC's AGNSS file, check every frame's checksum, write the raw frames (`casic.bin`) |
+| `tools/fetch_agnss.py` | fetch orbit data from CASIC's file or the IGS broadcast ephemeris (falling back from one to the other), check every frame's checksum, write the raw frames (`casic.bin`) |
 | `results/` | measurements, with conditions |
 
 ## Using the library
@@ -77,7 +77,7 @@ assumed to be IEEE 754, as on every common MCU.
 
 1. Flash MicroPython (ESP32_GENERIC_S3) to a Heltec WiFi LoRa 32 V4 with the L76K module plugged
    in. **Back up the board's existing firmware first** (`esptool read-flash 0 ALL backup.bin`).
-2. `python3 tools/fetch_casic.py casic.bin`, then copy `casic.bin` and the script to the board
+2. `python3 tools/fetch_agnss.py casic.bin`, then copy `casic.bin` and the script to the board
    (`mpremote fs cp casic.bin :casic.bin`, `mpremote run assisted_cold_start.py`). The file is good
    for a few hours.
 3. Run it outdoors, antenna up. It takes a first fix, then cold-restarts the receiver (confirming
@@ -98,6 +98,31 @@ Pins (Heltec V4, from Meshtastic's board definition): GNSS power GPIO 34 (low = 
   (U8), flags (U8: bit 0 position valid, bit 1 time valid). GPS time is UTC plus 18 leap seconds,
   counted from 1980-01-06.
 - **CASIC's AGNSS file** decodes to a text header and then the frames, ready to write as they are.
+- **MSG-GPSEPH** (0x08 0x07, 72 bytes) is the satellite's own LNAV ephemeris at its broadcast
+  resolution (IS-GPS-200): angles in semicircles, the week modulo 1024. The first four bytes are
+  reserved; CASIC fills them with a value that changes per record and is not documented.
+
+## Where the orbit data comes from
+
+CASIC's file is the satellites' broadcast ephemeris, and so is the IGS's: the International GNSS
+Service merges what its worldwide receivers hear into RINEX navigation files, which NASA CDDIS,
+BKG and IGN all publish. The two are interchangeable. Compared field by field on 2026-10-17, all
+32 of CASIC's GPS records equal the IGS record with the same toe and IODC in every orbit and clock
+term. The URA (accuracy) index disagreed on 6 of 32, and the reserved first four bytes differ.
+
+| source | what | size | access |
+| --- | --- | --- | --- |
+| `casic` (default) | CASIC's AGNSS file via Espruino's mirror: GPS ephemeris + ionosphere, already framed | ~3.6 kB | anonymous; one mirror |
+| `igs` (fallback) | BKG's merged broadcast RINEX, refreshed every 15 min; the newest GPS record per satellite is encoded | ~1.3 MB/day gzipped | anonymous HTTPS |
+| `--rinex FILE_OR_URL` | any RINEX 3 navigation file: NASA CDDIS (needs an Earthdata login), IGN, or your own | | |
+
+`casic_gpseph_frame()` does the same encoding in C, from a `casic_gps_eph_t` filled with RINEX
+values (radians, seconds, metres), so a phone or gateway can convert RINEX itself and send only
+the ~2.6 kB of frames. The test suite checks it byte for byte against CASIC's file.
+
+**Not yet measured:** a cold start on the receiver with IGS-encoded frames. They match CASIC's
+frames in every documented byte, but the receiver's answer to the zeroed reserved bytes is
+untested.
 
 ## Credits and sources
 
@@ -108,14 +133,16 @@ Pins (Heltec V4, from Meshtastic's board definition): GNSS power GPIO 34 (low = 
 - [Espruino](https://www.espruino.com/) republishes CASIC's AGNSS data at
   `espruino.com/agps/casic.base64`; Bangle.js 2 uses it with the same AT6558 chip
   ([discussion](https://github.com/orgs/espruino/discussions/7026)).
+- [IGS](https://igs.org/) and [BKG](https://igs.bkg.bund.de/) for the merged broadcast ephemeris;
+  [NASA CDDIS](https://cddis.nasa.gov/Data_and_Derived_Products/GNSS/broadcast_ephemeris_data.html)
+  archives the same files.
 - Quectel, *L76K GNSS Protocol Specification* V1.1; Hangzhou Zhongke Microelectronics, *CASIC
   Multimode Satellite Navigation Receiver Protocol Specification*.
 
 CASIC is the China Aerospace Science and Industry Corporation, whose AGNSS service the file
 comes from; Espruino republishes it. The data is the satellites' own broadcast orbit data, so
 fetching it reveals nothing about the receiver. This repository does not redistribute it, it
-fetches it. If that source goes away, the same broadcast ephemeris is published elsewhere (for
-example as RINEX navigation files) and could be converted into MSG-GPSEPH frames.
+fetches it. If that source goes away, `tools/fetch_agnss.py` falls back to the IGS files.
 
 ## Licence
 

@@ -155,6 +155,114 @@ size_t casic_aid_ini_frame(const casic_aid_ini_t *aid, uint8_t *out, size_t out_
     return casic_frame(CASIC_CLS_AID, CASIC_ID_AID_INI, p, sizeof p, out, out_cap);
 }
 
+/* ------------------------------------------------------------------ MSG-GPSEPH */
+
+uint8_t casic_ura_index(double metres)
+{
+    static const double upper[15] = {2.4, 3.4, 4.85, 6.85, 9.65, 13.65, 24, 48, 96, 192, 384, 768,
+                                     1536, 3072, 6144};
+    uint8_t n;
+    for (n = 0; n < 15; n++)
+        if (metres <= upper[n]) return n;
+    return 15;
+}
+
+/* Round v / lsb to the nearest integer; clear *ok if it falls outside [lo, hi]. */
+static int64_t quant(double v, double lsb, int64_t lo, int64_t hi, int *ok)
+{
+    double q = v / lsb;
+    int64_t r;
+    if (!(q > (double)lo - 1.0 && q < (double)hi + 1.0)) { *ok = 0; return 0; }
+    r = (int64_t)(q >= 0 ? q + 0.5 : q - 0.5);
+    if (r < lo || r > hi) { *ok = 0; return 0; }
+    return r;
+}
+#define Q32S(v, lsb) ((uint32_t)(int32_t)quant(v, lsb, INT32_MIN, INT32_MAX, &ok))
+#define Q32U(v, lsb) ((uint32_t)quant(v, lsb, 0, UINT32_MAX, &ok))
+#define Q16S(v, lsb) ((uint16_t)(int16_t)quant(v, lsb, INT16_MIN, INT16_MAX, &ok))
+#define Q16U(v, lsb) ((uint16_t)quant(v, lsb, 0, UINT16_MAX, &ok))
+#define Q8S(v, lsb) ((uint8_t)(int8_t)quant(v, lsb, INT8_MIN, INT8_MAX, &ok))
+
+int casic_gpseph_payload(const casic_gps_eph_t *e, uint8_t out[CASIC_GPSEPH_LEN])
+{
+    const double sc = 1.0 / CASIC_GPS_PI;    /* radians to semicircles */
+    int ok = 1;
+    memset(out, 0, CASIC_GPSEPH_LEN);
+    wr32(out + 4, Q32U(e->sqrt_a, 0x1p-19));
+    wr32(out + 8, Q32U(e->e, 0x1p-33));
+    wr32(out + 12, Q32S(e->omega * sc, 0x1p-31));
+    wr32(out + 16, Q32S(e->m0 * sc, 0x1p-31));
+    wr32(out + 20, Q32S(e->i0 * sc, 0x1p-31));
+    wr32(out + 24, Q32S(e->omega0 * sc, 0x1p-31));
+    wr32(out + 28, Q32S(e->omega_dot * sc, 0x1p-43));
+    wr16(out + 32, Q16S(e->delta_n * sc, 0x1p-43));
+    wr16(out + 34, Q16S(e->idot * sc, 0x1p-43));
+    wr16(out + 36, Q16S(e->cuc, 0x1p-29));
+    wr16(out + 38, Q16S(e->cus, 0x1p-29));
+    wr16(out + 40, Q16S(e->crc, 0x1p-5));
+    wr16(out + 42, Q16S(e->crs, 0x1p-5));
+    wr16(out + 44, Q16S(e->cic, 0x1p-29));
+    wr16(out + 46, Q16S(e->cis, 0x1p-29));
+    wr16(out + 48, Q16U(e->toe, 16.0));
+    wr16(out + 50, (uint16_t)(e->week % 1024u));
+    wr32(out + 52, Q32U(e->toc, 16.0));
+    wr32(out + 56, Q32S(e->af0, 0x1p-31));
+    wr16(out + 60, Q16S(e->af1, 0x1p-43));
+    out[62] = Q8S(e->af2, 0x1p-55);
+    out[63] = Q8S(e->tgd, 0x1p-31);
+    wr16(out + 64, e->iodc);
+    out[66] = e->ura;
+    out[67] = e->health;
+    out[68] = e->svid;
+    out[69] = e->valid;
+    if (e->svid < 1 || e->svid > 32) ok = 0;
+    return ok;
+}
+
+size_t casic_gpseph_frame(const casic_gps_eph_t *eph, uint8_t *out, size_t out_cap)
+{
+    uint8_t p[CASIC_GPSEPH_LEN];
+    if (!casic_gpseph_payload(eph, p)) return 0;
+    return casic_frame(CASIC_CLS_MSG, CASIC_ID_MSG_GPSEPH, p, sizeof p, out, out_cap);
+}
+
+static double s32(const uint8_t *p) { return (double)(int32_t)rd32(p); }
+static double s16(const uint8_t *p) { return (double)(int16_t)rd16(p); }
+
+int casic_gpseph_decode(const uint8_t *p, uint16_t len, casic_gps_eph_t *e)
+{
+    const double pi = CASIC_GPS_PI;
+    if (len != CASIC_GPSEPH_LEN) return 0;
+    e->sqrt_a = rd32(p + 4) * 0x1p-19;
+    e->e = rd32(p + 8) * 0x1p-33;
+    e->omega = s32(p + 12) * 0x1p-31 * pi;
+    e->m0 = s32(p + 16) * 0x1p-31 * pi;
+    e->i0 = s32(p + 20) * 0x1p-31 * pi;
+    e->omega0 = s32(p + 24) * 0x1p-31 * pi;
+    e->omega_dot = s32(p + 28) * 0x1p-43 * pi;
+    e->delta_n = s16(p + 32) * 0x1p-43 * pi;
+    e->idot = s16(p + 34) * 0x1p-43 * pi;
+    e->cuc = s16(p + 36) * 0x1p-29;
+    e->cus = s16(p + 38) * 0x1p-29;
+    e->crc = s16(p + 40) * 0x1p-5;
+    e->crs = s16(p + 42) * 0x1p-5;
+    e->cic = s16(p + 44) * 0x1p-29;
+    e->cis = s16(p + 46) * 0x1p-29;
+    e->toe = rd16(p + 48) * 16.0;
+    e->week = rd16(p + 50);
+    e->toc = rd32(p + 52) * 16.0;
+    e->af0 = s32(p + 56) * 0x1p-31;
+    e->af1 = s16(p + 60) * 0x1p-43;
+    e->af2 = (int8_t)p[62] * 0x1p-55;
+    e->tgd = (int8_t)p[63] * 0x1p-31;
+    e->iodc = rd16(p + 64);
+    e->ura = p[66];
+    e->health = p[67];
+    e->svid = p[68];
+    e->valid = p[69];
+    return 1;
+}
+
 /* ------------------------------------------------------------------ NMEA */
 
 static const char HEX[] = "0123456789ABCDEF";
