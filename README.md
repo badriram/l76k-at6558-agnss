@@ -122,8 +122,9 @@ on which the two sources disagreed for 6 of 32 satellites.
 values (radians, seconds, metres), so a phone or gateway can convert RINEX itself and send only
 the ~2.6 kB of frames. The test suite checks it byte for byte against CASIC's file.
 
-**Not yet measured:** a cold start on the receiver with IGS-encoded frames. They are the same
-bytes as CASIC's (check word included) except, sometimes, the URA index.
+**Measured on the receiver:** IGS-encoded frames are all acknowledged, and an assisted cold start
+fixes as fast with them as with CASIC's file: 5.4, 4.3 and 5.4 s against 5.4, 5.3 and 4.3 s
+([results](results/2026-10-17-heltec-l76k.md#igs-broadcast-ephemeris-against-casics-file)).
 
 ## Credits and sources
 
