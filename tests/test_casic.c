@@ -177,9 +177,9 @@ static void test_gpseph(void)
 
     rinex_g08(&e);
     CHECK(casic_gpseph_payload(&e, p) == 1);
-    /* Everything but the first four bytes, which CASIC fills with an undocumented value. */
-    CHECK(memcmp(p + 4, casic_g08 + 4, sizeof p - 4) == 0);
-    CHECK(p[0] == 0 && p[1] == 0 && p[2] == 0 && p[3] == 0);
+    CHECK(memcmp(p, casic_g08, sizeof p) == 0);           /* byte for byte, word sum included */
+    CHECK(casic_msg_word_sum(casic_g08, sizeof casic_g08) ==
+          (uint32_t)(casic_g08[0] | casic_g08[1] << 8 | casic_g08[2] << 16 | (uint32_t)casic_g08[3] << 24));
 
     n = casic_gpseph_frame(&e, frame, sizeof frame);
     CHECK(n == 82 && casic_frame_parse(frame, n, &f) == 1 && f.cls == 0x08 && f.id == 0x07);
@@ -188,7 +188,7 @@ static void test_gpseph(void)
     CHECK(casic_gpseph_decode(casic_g08, sizeof casic_g08, &d) == 1);
     CHECK(d.svid == 8 && d.week == 392 && d.toe == 597600.0 && d.iodc == 17 && d.ura == 0);
     CHECK(fabs(d.sqrt_a - e.sqrt_a) < 1e-6 && fabs(d.m0 - e.m0) < 1e-11 && fabs(d.omega0 - e.omega0) < 1e-11);
-    CHECK(casic_gpseph_payload(&d, p) == 1 && memcmp(p + 4, casic_g08 + 4, sizeof p - 4) == 0);
+    CHECK(casic_gpseph_payload(&d, p) == 1 && memcmp(p, casic_g08, sizeof p) == 0);
 
     CHECK(casic_ura_index(2.8) == 1 && casic_ura_index(4.0) == 2 && casic_ura_index(32) == 7 &&
           casic_ura_index(1e5) == 15);

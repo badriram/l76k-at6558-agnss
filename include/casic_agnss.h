@@ -141,6 +141,13 @@ typedef struct {
 #define CASIC_GPSEPH_VALID 3
 #define CASIC_GPS_PI 3.1415926535898     /* the value IS-GPS-200 defines semicircles with */
 
+/*
+ * The first four bytes of MSG-GPSEPH and MSG-GPSION, "reserved" in CASIC's specification, hold the
+ * sum of the payload's remaining little-endian 32-bit words. Every record in CASIC's own AGNSS file
+ * obeys this; the encoders here fill it in.
+ */
+uint32_t casic_msg_word_sum(const uint8_t *payload, uint16_t len);
+
 /* The URA index for a RINEX "SV accuracy" in metres (IS-GPS-200 table 20-I). */
 uint8_t casic_ura_index(double metres);
 

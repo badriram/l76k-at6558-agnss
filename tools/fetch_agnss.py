@@ -16,9 +16,9 @@ Sources, tried in the order given (default: casic, then igs):
          same files are at NASA CDDIS (needs an Earthdata login) and IGN; pass one with --rinex.
 
 Both carry the satellites' own broadcast data, so they agree: checked field by field, every orbit
-and clock term of CASIC's file equals the IGS record with the same toe and IODC. The one
-difference is MSG-GPSEPH's first four bytes, which CASIC fills with an undocumented value and this
-tool leaves zero. No ionosphere message is written for igs unless the RINEX header carries one.
+and clock term of CASIC's file equals the IGS record with the same toe and IODC, and the frames
+come out byte for byte the same apart from the URA index, where the two sources sometimes disagree.
+The "reserved" first word is the sum of the payload's other words, filled in here as CASIC does. No ionosphere message is written for igs unless the RINEX header carries one.
 """
 import argparse, base64, datetime as dt, gzip, io, math, struct, sys, urllib.request
 
@@ -35,6 +35,15 @@ def checksum(cls, mid, payload):
     for i in range(0, len(payload) - len(payload) % 4, 4):
         ck += struct.unpack("<I", payload[i:i + 4])[0]
     return ck & 0xFFFFFFFF
+
+
+def word_sum(payload):
+    """MSG-GPSEPH and MSG-GPSION's "reserved" first word: the sum of the payload's other U4 words."""
+    return sum(struct.unpack_from("<%dI" % (len(payload) // 4 - 1), payload, 4)) & 0xFFFFFFFF
+
+
+def with_word_sum(payload):
+    return struct.pack("<I", word_sum(payload)) + payload[4:]
 
 
 def frame(cls, mid, payload):
@@ -82,7 +91,7 @@ def q(v, lsb, fmt):
 def gpseph_payload(r, sv):
     s = 1 / PI
     healthy = int(r["health"]) == 0
-    return struct.pack(
+    return with_word_sum(struct.pack(
         "<IIIiiiiihhhhhhhhHHIihbbHBBBBH",
         0,
         q(r["sqrtA"], 2**-19, "I"), q(r["e"], 2**-33, "I"),
@@ -94,7 +103,7 @@ def gpseph_payload(r, sv):
         q(r["toe"], 16, "H"), int(r["week"]) % 1024, q(r["toc"], 16, "I"),
         q(r["af0"], 2**-31, "i"), q(r["af1"], 2**-43, "h"), q(r["af2"], 2**-55, "b"),
         q(r["TGD"], 2**-31, "b"), int(r["IODC"]), ura_index(r["svacc"]), int(r["health"]),
-        sv, 3 if healthy else 1, 0)
+        sv, 3 if healthy else 1, 0))
 
 
 NAMES = ["af0", "af1", "af2", "IODE", "Crs", "deltaN", "M0", "Cuc", "e", "Cus", "sqrtA", "toe", "Cic",
@@ -149,10 +158,10 @@ def encode_rinex(text, now):
     out = b"".join(frame(0x08, 0x07, gpseph_payload(best[sv], sv)) for sv in sorted(best))
     if "GPSA" in ion and "GPSB" in ion:
         a, b = ion["GPSA"], ion["GPSB"]
-        out += frame(0x08, 0x06, struct.pack(
+        out += frame(0x08, 0x06, with_word_sum(struct.pack(
             "<I8bBBH", 0,
             *(q(v, s, "b") for v, s in zip(a, (2**-30, 2**-27, 2**-24, 2**-24))),
-            *(q(v, s, "b") for v, s in zip(b, (2**11, 2**14, 2**16, 2**16))), 3, 0, 0))
+            *(q(v, s, "b") for v, s in zip(b, (2**11, 2**14, 2**16, 2**16))), 3, 0, 0)))
     return out
 
 

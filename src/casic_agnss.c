@@ -157,6 +157,15 @@ size_t casic_aid_ini_frame(const casic_aid_ini_t *aid, uint8_t *out, size_t out_
 
 /* ------------------------------------------------------------------ MSG-GPSEPH */
 
+uint32_t casic_msg_word_sum(const uint8_t *payload, uint16_t len)
+{
+    uint32_t sum = 0;
+    uint16_t i;
+    for (i = 4; i + 4 <= len; i += 4)
+        sum += rd32(payload + i);
+    return sum;
+}
+
 uint8_t casic_ura_index(double metres)
 {
     static const double upper[15] = {2.4, 3.4, 4.85, 6.85, 9.65, 13.65, 24, 48, 96, 192, 384, 768,
@@ -216,6 +225,7 @@ int casic_gpseph_payload(const casic_gps_eph_t *e, uint8_t out[CASIC_GPSEPH_LEN]
     out[68] = e->svid;
     out[69] = e->valid;
     if (e->svid < 1 || e->svid > 32) ok = 0;
+    wr32(out, casic_msg_word_sum(out, CASIC_GPSEPH_LEN));
     return ok;
 }
 

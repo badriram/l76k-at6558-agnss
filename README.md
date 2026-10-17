@@ -99,8 +99,9 @@ Pins (Heltec V4, from Meshtastic's board definition): GNSS power GPIO 34 (low = 
   counted from 1980-01-06.
 - **CASIC's AGNSS file** decodes to a text header and then the frames, ready to write as they are.
 - **MSG-GPSEPH** (0x08 0x07, 72 bytes) is the satellite's own LNAV ephemeris at its broadcast
-  resolution (IS-GPS-200): angles in semicircles, the week modulo 1024. The first four bytes are
-  reserved; CASIC fills them with a value that changes per record and is not documented.
+  resolution (IS-GPS-200): angles in semicircles, the week modulo 1024. **The first four bytes,
+  "reserved" in the specification, are a check word**: the sum of the payload's other seventeen
+  little-endian 32-bit words. All 32 records in CASIC's file, and its MSG-GPSION, obey this.
 
 ## Where the orbit data comes from
 
@@ -108,7 +109,8 @@ CASIC's file is the satellites' broadcast ephemeris, and so is the IGS's: the In
 Service merges what its worldwide receivers hear into RINEX navigation files, which NASA CDDIS,
 BKG and IGN all publish. The two are interchangeable. Compared field by field on 2026-10-17, all
 32 of CASIC's GPS records equal the IGS record with the same toe and IODC in every orbit and clock
-term. The URA (accuracy) index disagreed on 6 of 32, and the reserved first four bytes differ.
+term, and the encoded frames are byte for byte identical apart from the URA (accuracy) index,
+on which the two sources disagreed for 6 of 32 satellites.
 
 | source | what | size | access |
 | --- | --- | --- | --- |
@@ -120,9 +122,8 @@ term. The URA (accuracy) index disagreed on 6 of 32, and the reserved first four
 values (radians, seconds, metres), so a phone or gateway can convert RINEX itself and send only
 the ~2.6 kB of frames. The test suite checks it byte for byte against CASIC's file.
 
-**Not yet measured:** a cold start on the receiver with IGS-encoded frames. They match CASIC's
-frames in every documented byte, but the receiver's answer to the zeroed reserved bytes is
-untested.
+**Not yet measured:** a cold start on the receiver with IGS-encoded frames. They are the same
+bytes as CASIC's (check word included) except, sometimes, the URA index.
 
 ## Credits and sources
 
