@@ -174,12 +174,17 @@ class Orbit:
                         t_eval=times, rtol=1e-11, atol=1e-5, args=(srp,))
         return sol.y[:3].T
 
-    def fit(self, times, positions_gcrs):
+    def fit(self, times, positions_gcrs, start=None):
         """Initial state and radiation-pressure terms that best reproduce the positions. Returns
-        (state, srp, rms m). The arc must start at t0."""
+        (state, srp, rms m, solver evaluations). The arc must start at t0. start: an optional
+        (state, srp) to begin from, such as the previous run's carried forward; it changes only
+        where the solver starts, not what it fits."""
         ts, xs = np.asarray(times, float), np.asarray(positions_gcrs, float)
-        v0 = (_lagrange(ts, xs, ts[0] + 1.0) - _lagrange(ts, xs, ts[0] - 1.0)) / 2.0
-        x0 = np.concatenate([xs[0], v0, np.zeros(5)])
+        if start is None:
+            v0 = (_lagrange(ts, xs, ts[0] + 1.0) - _lagrange(ts, xs, ts[0] - 1.0)) / 2.0
+            x0 = np.concatenate([xs[0], v0, np.zeros(5)])
+        else:
+            x0 = np.concatenate([start[0], start[1]])
         scale = np.array([1, 1, 1, 1e-3, 1e-3, 1e-3, 1, 1, 1, 1, 1])
 
         def res(p):
@@ -197,4 +202,4 @@ class Orbit:
 
         sol = least_squares(res, np.zeros(11), jac=jac, method="lm", xtol=1e-12, ftol=1e-12, max_nfev=40)
         q = x0 + sol.x * scale
-        return q[:6], q[6:], math.sqrt(float(np.mean(sol.fun ** 2)))
+        return q[:6], q[6:], math.sqrt(float(np.mean(sol.fun ** 2))), int(sol.nfev)
