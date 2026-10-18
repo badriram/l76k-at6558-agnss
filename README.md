@@ -37,7 +37,7 @@ More findings, all on the same receiver, in [`results/`](results/2026-10-17-helt
 
 | path | what |
 | --- | --- |
-| `include/casic_agnss.h`, `src/casic_agnss.c` | **the C library**: portable C99, no allocation, no OS, no stdio, byte order explicit. CASIC framing and checksum, AID-INI, CASIC AGNSS file parsing, a MSG-GPSEPH encoder and decoder for RINEX-sourced ephemeris, CFG-MSG, ACK decoding, NMEA commands, a GGA/RMC parser, GPS time, and a stream splitter for the receiver's mixed NMEA-and-binary output |
+| `include/casic_agnss.h`, `src/casic_agnss.c` | **the C library**: portable C99, no allocation, no OS, no stdio, byte order explicit. CASIC framing and checksum, AID-INI, CASIC AGNSS file parsing, MSG-GPSEPH and MSG-BDSEPH encoders and decoders for RINEX-sourced ephemeris, CFG-MSG, ACK decoding, NMEA commands, a GGA/RMC parser, GPS time, and a stream splitter for the receiver's mixed NMEA-and-binary output |
 | `examples/assist_cold_start.c` | the assisted cold start against four platform hooks (UART write/read, milliseconds, sleep): fill them in for Zephyr, ESP-IDF, Arduino or anything else |
 | `tests/test_casic.c` | host tests (`make test`), against Quectel's worked examples and independently computed values |
 | `micropython/heltec_v4_l76k/assisted_cold_start.py` | the measurement above, on a Heltec WiFi LoRa 32 V4 with its L76K module; logs to `/gnss_assist_log.txt` on the board |
@@ -115,8 +115,20 @@ on which the two sources disagreed for 6 of 32 satellites.
 | source | what | size | access |
 | --- | --- | --- | --- |
 | `casic` (default) | CASIC's AGNSS file via Espruino's mirror: GPS ephemeris + ionosphere, already framed | ~3.6 kB | anonymous; one mirror |
-| `igs` (fallback) | BKG's merged broadcast RINEX, refreshed every 15 min; the newest GPS record per satellite is encoded | ~1.3 MB/day gzipped | anonymous HTTPS |
+| `igs` (fallback) | BKG's merged broadcast RINEX, refreshed every 15 min; for each GPS and BeiDou (C01-C37) satellite, the record nearest now is encoded | ~1.3 MB/day gzipped | anonymous HTTPS |
 | `--rinex FILE_OR_URL` | any RINEX 3 navigation file: NASA CDDIS (needs an Earthdata login), IGN, or your own | | |
+
+**BeiDou too.** CASIC's file is GPS only; the IGS file also carries BeiDou, which the L76K tracks.
+`fetch_agnss.py` encodes it as MSG-BDSEPH (0x08 0x02, 92 bytes; `--gps-only` leaves it out), and
+`casic_bdseph_frame()` does the same in C. Checked against CASIC data that does carry BeiDou (the
+file openLuat serves for its Air530Z-BD module, `download.openluat.com/9501-xingli/CASIC_data.dat`,
+fetched 2026-10-18 00:11 UTC): 24 of 32 BeiDou records came out byte for byte identical, check word
+included, and the other 8 differ only in AODC, the broadcast's age-of-clock-data counter (0 against
+1), which the two sources sampled minutes apart. The same check word rule holds for MSG-BDSEPH and
+MSG-BDSION. Not yet measured: a cold start on the L76K using BeiDou orbit data. The
+specification numbers BeiDou satellites 1-37, so newer BeiDou-3 satellites are left out, and the
+L76K's firmware is in ROM and cannot be upgraded
+([Quectel forum](https://forums.quectel.com/t/firmware-protocol-version-for-the-l76k/40194)).
 
 `casic_gpseph_frame()` does the same encoding in C, from a `casic_gps_eph_t` filled with RINEX
 values (radians, seconds, metres), so a phone or gateway can convert RINEX itself and send only
@@ -135,6 +147,8 @@ fixes as fast with them as with CASIC's file: 5.4, 4.3 and 5.4 s against 5.4, 5.
 - [Espruino](https://www.espruino.com/) republishes CASIC's AGNSS data at
   `espruino.com/agps/casic.base64`; Bangle.js 2 uses it with the same AT6558 chip
   ([discussion](https://github.com/orgs/espruino/discussions/7026)).
+- [openLuat](https://github.com/openLuat/LuatOS) serves a CASIC file with BeiDou, which confirmed
+  the MSG-BDSEPH encoding.
 - [IGS](https://igs.org/) and [BKG](https://igs.bkg.bund.de/) for the merged broadcast ephemeris;
   [NASA CDDIS](https://cddis.nasa.gov/Data_and_Derived_Products/GNSS/broadcast_ephemeris_data.html)
   archives the same files.

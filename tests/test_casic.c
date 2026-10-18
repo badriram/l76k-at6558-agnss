@@ -199,6 +199,50 @@ static void test_gpseph(void)
     CHECK(casic_gpseph_payload(&e, p) == 0);
 }
 
+/* BeiDou C35, toe 518400 s of BDT week 1084: one record from the same IGS file. CASIC's file has
+ * no BeiDou, so this checks the encoding against the broadcast grid and itself, not CASIC's bytes. */
+static void rinex_c35(casic_bds_eph_t *e)
+{
+    memset(e, 0, sizeof *e);
+    e->af0 = -6.013588281348e-04; e->af1 = -1.636912827507e-11; e->af2 = 0.0;
+    e->aode = 1; e->crs = 9.175000000000e+01; e->delta_n = 4.281964075277e-09; e->m0 = 3.559876220962e-01;
+    e->cuc = 4.649162292480e-06; e->e = 7.627503946424e-04; e->cus = 4.542991518974e-06; e->sqrt_a = 5.282618515015e+03;
+    e->toe = 5.184000000000e+05; e->cic = 4.284083843231e-08; e->omega0 = -1.463961755746e+00; e->cis = -1.490116119385e-08;
+    e->i0 = 9.417515517551e-01; e->crc = 2.573437500000e+02; e->omega = 7.363445759815e-01; e->omega_dot = -7.099581440350e-09;
+    e->idot = -1.271481533738e-10; e->week = 1084;
+    e->ura = casic_ura_index(2.0); e->health = 0; e->tgd1 = -2.700000000000e-09; e->aodc = 1;
+    e->toc = e->toe; e->svid = 35; e->valid = CASIC_GPSEPH_VALID;
+}
+
+static int32_t le32(const uint8_t *p)
+{
+    return (int32_t)((uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24);
+}
+
+static void test_bdseph(void)
+{
+    casic_bds_eph_t e, d;
+    uint8_t p[CASIC_BDSEPH_LEN], q[CASIC_BDSEPH_LEN], frame[120];
+    casic_frame_t f;
+    size_t n;
+
+    rinex_c35(&e);
+    CHECK(casic_bdseph_payload(&e, p) == 1);
+    CHECK(le32(p + 48) == 5872 && le32(p + 44) == 16470);          /* crs, crc at 2^-6 m */
+    CHECK(le32(p + 60) == 64800 && p[64] == 0x3C && p[65] == 0x04);  /* toe / 8, week 1084 */
+    CHECK((int16_t)(p[82] | p[83] << 8) == -27 && p[88] == 35);      /* tgd1 in 0.1 ns */
+    CHECK((uint32_t)le32(p) == casic_msg_word_sum(p, sizeof p));
+
+    n = casic_bdseph_frame(&e, frame, sizeof frame);
+    CHECK(n == 102 && casic_frame_parse(frame, n, &f) == 1 && f.cls == 0x08 && f.id == 0x02);
+    CHECK(casic_bdseph_decode(p, sizeof p, &d) == 1);
+    CHECK(fabs(d.sqrt_a - e.sqrt_a) < 1e-5 && fabs(d.omega0 - e.omega0) < 1e-11 && d.toe == e.toe &&
+          fabs(d.tgd1 - e.tgd1) < 1e-13 && d.aode == 1 && d.week == 1084);
+    CHECK(casic_bdseph_payload(&d, q) == 1 && memcmp(p, q, sizeof p) == 0);
+    e.svid = 38;                                         /* BeiDou-3 numbering beyond the spec */
+    CHECK(casic_bdseph_frame(&e, frame, sizeof frame) == 0);
+}
+
 struct counts { int nmea, frames, gga, acks; };
 static void on_nmea(void *ctx, const char *s, size_t n)
 {
@@ -251,6 +295,7 @@ int main(void)
     test_nmea();
     test_agnss_file();
     test_gpseph();
+    test_bdseph();
     test_stream();
     printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

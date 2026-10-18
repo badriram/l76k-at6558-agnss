@@ -35,6 +35,9 @@ extern "C" {
 #define CASIC_CLS_CFG 0x06
 #define CASIC_ID_CFG_MSG 0x01
 #define CASIC_CLS_MSG 0x08
+#define CASIC_ID_MSG_BDSUTC 0x00
+#define CASIC_ID_MSG_BDSION 0x01
+#define CASIC_ID_MSG_BDSEPH 0x02
 #define CASIC_ID_MSG_GPSUTC 0x05
 #define CASIC_ID_MSG_GPSION 0x06
 #define CASIC_ID_MSG_GPSEPH 0x07
@@ -144,7 +147,7 @@ typedef struct {
 /*
  * The first four bytes of MSG-GPSEPH and MSG-GPSION, "reserved" in CASIC's specification, hold the
  * sum of the payload's remaining little-endian 32-bit words. Every record in CASIC's own AGNSS file
- * obeys this; the encoders here fill it in.
+ * obeys this; the encoders here fill it in, for MSG-BDSEPH too (which CASIC's file never carries).
  */
 uint32_t casic_msg_word_sum(const uint8_t *payload, uint16_t len);
 
@@ -159,6 +162,44 @@ size_t casic_gpseph_frame(const casic_gps_eph_t *eph, uint8_t *out, size_t out_c
 
 /* Decode a MSG-GPSEPH payload (from CASIC's file, say) back into physical units. Returns 1, or 0 if len is wrong. */
 int casic_gpseph_decode(const uint8_t *payload, uint16_t len, casic_gps_eph_t *eph);
+
+/* ------------------------------------------------------------------ MSG-BDSEPH */
+
+/*
+ * One BeiDou satellite's broadcast ephemeris (B1I D1/D2), in RINEX units like casic_gps_eph_t.
+ * Times are BeiDou time (BDT: GPS time minus 14 s, weeks counted from 2006-01-01). The 92-byte
+ * MSG-BDSEPH carries each field at its broadcast resolution, so RINEX values encode exactly (all
+ * 849 BeiDou records of a day's IGS file land on the grid). The CASIC specification numbers BeiDou
+ * satellites 1-37; newer BeiDou-3 satellites (C38 and up) are refused.
+ */
+typedef struct {
+    double sqrt_a, e;
+    double omega, m0, i0, omega0;        /* rad */
+    double omega_dot, delta_n, idot;     /* rad/s */
+    double cuc, cus, cic, cis;           /* rad */
+    double crc, crs;                     /* m */
+    double toe, toc;                     /* seconds of BDT week */
+    double af0, af1, af2;
+    double tgd1;                         /* B1I group delay, s */
+    uint16_t week;                       /* BDT week */
+    uint8_t aodc, aode;                  /* ages of clock and ephemeris data, as broadcast */
+    uint8_t ura;                         /* URA index (casic_ura_index) */
+    uint8_t health;                      /* SatH1: 0 = healthy */
+    uint8_t svid;                        /* PRN 1-37 */
+    uint8_t valid;                       /* as casic_gps_eph_t */
+} casic_bds_eph_t;
+
+#define CASIC_BDSEPH_LEN 92u
+#define CASIC_BDS_MAX_SVID 37
+
+/* The 92-byte payload. Returns 1, or 0 if a field is out of its broadcast range. */
+int casic_bdseph_payload(const casic_bds_eph_t *eph, uint8_t out[CASIC_BDSEPH_LEN]);
+
+/* The whole frame (102 bytes). Returns its length, or 0. */
+size_t casic_bdseph_frame(const casic_bds_eph_t *eph, uint8_t *out, size_t out_cap);
+
+/* Decode a MSG-BDSEPH payload. Returns 1, or 0 if len is wrong. */
+int casic_bdseph_decode(const uint8_t *payload, uint16_t len, casic_bds_eph_t *eph);
 
 /* ------------------------------------------------------------------ NMEA */
 

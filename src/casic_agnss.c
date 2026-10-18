@@ -273,6 +273,88 @@ int casic_gpseph_decode(const uint8_t *p, uint16_t len, casic_gps_eph_t *e)
     return 1;
 }
 
+/* ------------------------------------------------------------------ MSG-BDSEPH */
+
+int casic_bdseph_payload(const casic_bds_eph_t *e, uint8_t out[CASIC_BDSEPH_LEN])
+{
+    const double sc = 1.0 / CASIC_GPS_PI;    /* BeiDou defines semicircles with the same pi */
+    int ok = 1;
+    memset(out, 0, CASIC_BDSEPH_LEN);
+    wr32(out + 4, Q32U(e->sqrt_a, 0x1p-19));
+    wr32(out + 8, Q32U(e->e, 0x1p-33));
+    wr32(out + 12, Q32S(e->omega * sc, 0x1p-31));
+    wr32(out + 16, Q32S(e->m0 * sc, 0x1p-31));
+    wr32(out + 20, Q32S(e->i0 * sc, 0x1p-31));
+    wr32(out + 24, Q32S(e->omega0 * sc, 0x1p-31));
+    wr32(out + 28, Q32S(e->omega_dot * sc, 0x1p-43));
+    wr16(out + 32, Q16S(e->delta_n * sc, 0x1p-43));
+    wr16(out + 34, Q16S(e->idot * sc, 0x1p-43));
+    wr32(out + 36, Q32S(e->cuc, 0x1p-31));
+    wr32(out + 40, Q32S(e->cus, 0x1p-31));
+    wr32(out + 44, Q32S(e->crc, 0x1p-6));
+    wr32(out + 48, Q32S(e->crs, 0x1p-6));
+    wr32(out + 52, Q32S(e->cic, 0x1p-31));
+    wr32(out + 56, Q32S(e->cis, 0x1p-31));
+    wr32(out + 60, Q32U(e->toe, 8.0));
+    wr16(out + 64, e->week);
+    wr32(out + 68, Q32U(e->toc, 8.0));
+    wr32(out + 72, Q32S(e->af0, 0x1p-33));
+    wr32(out + 76, Q32S(e->af1, 0x1p-50));
+    wr16(out + 80, Q16S(e->af2, 0x1p-66));
+    wr16(out + 82, Q16S(e->tgd1, 1e-10));
+    out[84] = e->aodc;
+    out[85] = e->aode;
+    out[86] = e->ura;
+    out[87] = e->health;
+    out[88] = e->svid;
+    out[89] = e->valid;
+    if (e->svid < 1 || e->svid > CASIC_BDS_MAX_SVID) ok = 0;
+    wr32(out, casic_msg_word_sum(out, CASIC_BDSEPH_LEN));
+    return ok;
+}
+
+size_t casic_bdseph_frame(const casic_bds_eph_t *eph, uint8_t *out, size_t out_cap)
+{
+    uint8_t p[CASIC_BDSEPH_LEN];
+    if (!casic_bdseph_payload(eph, p)) return 0;
+    return casic_frame(CASIC_CLS_MSG, CASIC_ID_MSG_BDSEPH, p, sizeof p, out, out_cap);
+}
+
+int casic_bdseph_decode(const uint8_t *p, uint16_t len, casic_bds_eph_t *e)
+{
+    const double pi = CASIC_GPS_PI;
+    if (len != CASIC_BDSEPH_LEN) return 0;
+    e->sqrt_a = rd32(p + 4) * 0x1p-19;
+    e->e = rd32(p + 8) * 0x1p-33;
+    e->omega = s32(p + 12) * 0x1p-31 * pi;
+    e->m0 = s32(p + 16) * 0x1p-31 * pi;
+    e->i0 = s32(p + 20) * 0x1p-31 * pi;
+    e->omega0 = s32(p + 24) * 0x1p-31 * pi;
+    e->omega_dot = s32(p + 28) * 0x1p-43 * pi;
+    e->delta_n = s16(p + 32) * 0x1p-43 * pi;
+    e->idot = s16(p + 34) * 0x1p-43 * pi;
+    e->cuc = s32(p + 36) * 0x1p-31;
+    e->cus = s32(p + 40) * 0x1p-31;
+    e->crc = s32(p + 44) * 0x1p-6;
+    e->crs = s32(p + 48) * 0x1p-6;
+    e->cic = s32(p + 52) * 0x1p-31;
+    e->cis = s32(p + 56) * 0x1p-31;
+    e->toe = rd32(p + 60) * 8.0;
+    e->week = rd16(p + 64);
+    e->toc = rd32(p + 68) * 8.0;
+    e->af0 = s32(p + 72) * 0x1p-33;
+    e->af1 = s32(p + 76) * 0x1p-50;
+    e->af2 = s16(p + 80) * 0x1p-66;
+    e->tgd1 = s16(p + 82) * 1e-10;
+    e->aodc = p[84];
+    e->aode = p[85];
+    e->ura = p[86];
+    e->health = p[87];
+    e->svid = p[88];
+    e->valid = p[89];
+    return 1;
+}
+
 /* ------------------------------------------------------------------ NMEA */
 
 static const char HEX[] = "0123456789ABCDEF";
