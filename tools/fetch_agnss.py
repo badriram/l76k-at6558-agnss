@@ -15,9 +15,10 @@ Sources, tried in the order given (default: casic, then igs, then predicted):
          gzipped per day. For each satellite, the ephemeris nearest now is encoded: GPS as
          MSG-GPSEPH and BeiDou C01-C37 as MSG-BDSEPH (--gps-only to leave BeiDou out). The
          same files are at NASA CDDIS (needs an Earthdata login) and IGN; pass one with --rinex.
-  predicted  This repository's own week-ahead GPS prediction (tools/predict), published by its
-         GitHub Action to the agnss-data branch four times a day. Picks each satellite's record
-         nearest now. Download gps-7d.bin itself to carry a week of data offline.
+  predicted  The week-ahead GPS prediction (extended ephemeris) from
+         github.com/badriram/open-extended-ephemeris, published to its ephemeris-data branch.
+         Picks each satellite's record nearest now. Download gps-7d-casic.bin itself to carry a
+         week of data offline.
 
 Both carry the satellites' own broadcast data, so they agree: checked field by field, every orbit
 and clock term of CASIC's file equals the IGS record with the same toe and IODC, and the frames
@@ -27,7 +28,7 @@ The "reserved" first word is the sum of the payload's other words, filled in her
 import argparse, base64, datetime as dt, gzip, io, math, struct, sys, urllib.request
 
 CASIC_URL = "https://www.espruino.com/agps/casic.base64"
-PREDICTED_URL = "https://raw.githubusercontent.com/badriram/l76k-at6558-agnss/agnss-data/gps-7d.bin"
+PREDICTED_URL = "https://raw.githubusercontent.com/badriram/open-extended-ephemeris/ephemeris-data/gps-7d-casic.bin"
 IGS_URL = "https://igs.bkg.bund.de/root_ftp/IGS/BRDC/{y}/{doy:03d}/BRDC00WRD_S_{y}{doy:03d}0000_01D_MN.rnx.gz"
 GPS_EPOCH = dt.datetime(1980, 1, 6, tzinfo=dt.timezone.utc)
 LEAP = 18
@@ -256,8 +257,8 @@ def select_nearest(frames, now, max_age_s=FIT_S):
 
 
 def from_predicted(now, systems):
-    # A week of GPS ephemerides predicted from IGS ultra-rapid orbits by tools/predict, published
-    # four times a day by this repository's GitHub Action. Valid 7 days after it was made.
+    # A week of GPS ephemerides predicted from IGS ultra-rapid orbits by open-extended-ephemeris,
+    # published to its ephemeris-data branch. Valid 7 days after it was made.
     week = urllib.request.urlopen(PREDICTED_URL, timeout=60).read()
     out = select_nearest(week, now)
     if not out:

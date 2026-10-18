@@ -12,4 +12,4 @@ jobs:
       - name: C library tests (strict warnings)
         run: make test
       - name: Python tools parse
-        run: python3 -m py_compile tools/fetch_agnss.py tools/predict/*.py
+        run: python3 -m py_compile tools/fetch_agnss.py

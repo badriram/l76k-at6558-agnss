@@ -254,7 +254,7 @@ void casic_stream_feed(casic_stream_t *s, const uint8_t *data, size_t len);
 /* ------------------------------------------------------------------ choosing from many records */
 
 /*
- * A buffer may hold many ephemerides per satellite: the predicted week file (tools/predict) has one
+ * A buffer may hold many ephemerides per satellite: the predicted week file from open-extended-ephemeris has one
  * every 2 h for 7 days. For each GPS and BeiDou satellite, pick the MSG-GPSEPH / MSG-BDSEPH frame
  * whose reference time (toe) is nearest unix_now, skipping any more than max_age_s away (7200, the
  * usual validity, is right for a receiver that is about to use them), and call on_frame for each
