@@ -1,0 +1,59 @@
+{
+  "made": "2026-10-18T01:39:42+00:00",
+  "igs_orbit": "https://igs.bkg.bund.de/root_ftp/IGS/products/2440/IGS0OPSULT_20262891800_02D_15M_ORB.SP3.gz",
+  "igs_erp": "https://igs.bkg.bund.de/root_ftp/IGS/products/2440/IGS0OPSULT_20262891800_02D_01D_ERP.ERP.gz",
+  "broadcasts": [
+    "https://igs.bkg.bund.de/root_ftp/IGS/BRDC/2026/289/BRDC00WRD_S_20262890000_01D_MN.rnx.gz",
+    "https://igs.bkg.bund.de/root_ftp/IGS/BRDC/2026/290/BRDC00WRD_S_20262900000_01D_MN.rnx.gz",
+    "https://igs.bkg.bund.de/root_ftp/IGS/BRDC/2026/291/BRDC00WRD_S_20262910000_01D_MN.rnx.gz"
+  ],
+  "prediction_starts": "2026-10-17T17:59:42+00:00",
+  "valid_until": "2026-10-24T17:59:42+00:00",
+  "igs_prediction_until": "2026-10-18T17:44:42+00:00",
+  "satellites": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32
+  ],
+  "frames": 2720,
+  "bytes": 223040,
+  "force_model_fit_m": {
+    "median": 3.4497765872871877,
+    "worst": 4.422767369243402
+  },
+  "self_check_vs_broadcast": {
+    "samples": 768,
+    "median_m": 0.20431574234328664,
+    "p95_m": 0.5220361298532395
+  },
+  "backtest": "range error median/95%: 1.5/2.6 m first half day, 3.2/7.0 m at 2 days, 10/54 m at 4.5-5 days (IGS file 2026-10-13 06:00)"
+}
