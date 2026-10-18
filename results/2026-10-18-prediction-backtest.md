@@ -18,25 +18,43 @@ below that measure agreement with the broadcast rather than truth.
 
 | days after the IGS orbit | range error median | 95th percentile | worst | orbit 3D median | URA index sent |
 | --- | --- | --- | --- | --- | --- |
-| 0.0-0.5 | 0.32 m | 0.97 m | 2.2 m | 0.7 m | 2 |
-| 0.5-1.0 | 0.64 m | 2.51 m | 5.7 m | 1.0 m | 2 |
-| 1.0-1.5 | 2.38 m | 4.87 m | 7.1 m | 7.8 m | 4 |
-| 1.5-2.0 | 3.22 m | 7.02 m | 9.1 m | 12.7 m | 4 |
-| 2.0-2.5 | 4.17 m | 9.48 m | 13.1 m | 17.8 m | 6 |
-| 2.5-3.0 | 5.26 m | 13.76 m | 20.1 m | 23.7 m | 6 |
-| 3.0-3.5 | 6.55 m | 20.58 m | 29.9 m | 29.9 m | 7 |
-| 3.5-4.0 | 7.98 m | 29.26 m | 41.9 m | 36.2 m | 7 |
-| 4.0-4.5 | 9.46 m | 40.33 m | 57.2 m | 42.6 m | 8 |
-| 4.5-5.0 | 10.57 m | 53.55 m | 66.0 m | 46.9 m | 8 |
+| 0.0-0.5 | 0.32 m | 1.06 m | 2.2 m | 0.7 m | 2 |
+| 0.5-1.0 | 0.50 m | 1.90 m | 4.1 m | 0.7 m | 2 |
+| 1.0-1.5 | 0.81 m | 3.17 m | 5.2 m | 0.9 m | 4 |
+| 1.5-2.0 | 1.06 m | 5.08 m | 7.0 m | 0.9 m | 4 |
+| 2.0-2.5 | 1.47 m | 6.82 m | 8.4 m | 1.3 m | 6 |
+| 2.5-3.0 | 1.91 m | 8.62 m | 11.0 m | 1.6 m | 6 |
+| 3.0-3.5 | 2.50 m | 9.86 m | 14.1 m | 2.2 m | 7 |
+| 3.5-4.0 | 3.21 m | 12.10 m | 17.6 m | 3.1 m | 7 |
+| 4.0-4.5 | 3.99 m | 14.97 m | 21.7 m | 4.1 m | 8 |
+| 4.5-5.0 | 4.72 m | 17.22 m | 25.3 m | 5.0 m | 8 |
+
+(The URA index column is what that run sent; the table it comes from has since been tightened to
+these figures.)
+
+The first version of the tool, graded the same way the same day, reached 10.6 / 53.5 / 66 m at
+4.5-5 days with orbits off by 47 m. Three faults were behind the difference:
+
+1. **Earth orientation mixed two IAU conventions**: an equinox-based precession-nutation matrix
+   with the CIO-based Earth rotation angle, which turned the Earth by 0.49° in the model. The 48 h
+   fit fell from ~2.6 m RMS to ~0.15 m when fixed, and an implausible ~80 nm/s² radiation-pressure
+   term vanished.
+2. **Adaptive integration was noisy**: a 0.01 nm/s² change in radiation pressure "moved" the orbit
+   by half a metre because the step sizes changed. Fixed 120 s steps make the result smooth.
+3. **The fit stopped where it happened to be** (an evaluation cap, an ill-conditioned problem):
+   now Levenberg-Marquardt on scaled unknowns, a priori constraints on the four secondary
+   radiation-pressure terms, run to a 0.1 mm step. A fit from scratch and one started from a
+   poor guess now agree to 0.2 mm after seven days (they were 350 m apart).
 
 For comparison, reusing a real broadcast record past its validity reached a median range error of
 ~58 m after 12 hours and ~120 m after 22 (orbit off by ~390 m).
 
 Notes:
 
-- The force-model fit to the 48 h IGS arc is 2.6-3.6 m RMS for every satellite. A constant
-  acceleration along the third ECOM axis comes out at ~80 nm/s², far larger than is usual for GPS,
-  so something is still unmodelled; finding it should slow the growth after day 1.
+- The force-model fit to the 48 h IGS arc is 0.12-0.26 m RMS for every satellite, with
+  radiation-pressure terms of usual size (D0 about -100 nm/s², the others within a few).
+- Range error grows faster than orbit error: the clock, a straight line through 48 h of IGS
+  estimates, is now most of it.
 - The first day uses the IGS's own prediction directly (fitted to 0.1 m), which is why it is so
   much better than days 1-5.
 - Days 5-7 were not graded: BKG keeps only about a week of files.

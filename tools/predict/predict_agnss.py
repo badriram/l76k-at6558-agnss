@@ -23,10 +23,10 @@ from what it was made, and a self-check). A receiver needs, for each satellite, 
 toe is nearest now: casic_eph_select() in the C library picks them.
 
 Backtest (IGS file of 2026-10-13 06:00, against the satellites' broadcasts over the next 4.7
-days): range error, median / 95th percentile, 1.5 / 2.6 m in the first half day, 3.2 / 7.0 m at
-2 days, 10 / 54 m at 4.5-5 days.
+days): range error, median / 95th percentile, 0.3 / 1.1 m in the first half day, 1.1 / 5.1 m at
+2 days, 4.7 / 17 m at 4.5-5 days; worst 25 m.
 """
-import argparse, datetime as dt, gzip, io, json, math, os, re, sys, urllib.request
+import argparse, datetime as dt, gzip, io, json, math, os, re, sys, time, urllib.request
 from multiprocessing import Pool
 
 import numpy as np
@@ -44,7 +44,8 @@ STEP = 7200                                   # one ephemeris every 2 h, as the 
 DAYS = 7
 C = 299792458.0
 # 95th-percentile range error by age in the backtest, as metres for the URA index.
-URA_BY_DAY = [3.6, 7.0, 14.0, 29.0, 54.0, 80.0, 110.0]
+URA_BY_DAY = [1.9, 5.1, 8.6, 12.1, 17.2, 25.0, 35.0]
+WARM_MAX_RMS = 6.0       # a warm-started force-model fit worse than this is redone from scratch
 
 
 def gps_s(t):
@@ -164,12 +165,25 @@ def lagrange(ts, ys, t, order=10):
 # ---------------------------------------------------------------- one satellite
 
 def predict_sat(job):
-    sv, (ts, xs, cs, pf), recs, erp, t_end = job
+    sv, (ts, xs, cs, pf), recs, erp, t_end, warm = job
+    t_begin = time.time()
     pred_start = ts[pf][0] if pf.any() else ts[len(ts) // 2]
-    eo = orbit.EarthOrientation(erp, ts[0], t_end)
+    eo = orbit.EarthOrientation(erp, min(ts[0], warm["t0"]) if warm else ts[0], t_end)
     model = orbit.Orbit(eo, ts[0])
     xg = np.array([eo.c2t(t).T @ x for t, x in zip(ts, xs)])
-    state, srp, fit_rms = model.fit(ts, xg)
+    started = "cold"
+    if warm:
+        # The previous run's fitted state, carried forward to this arc's start with its own forces.
+        prev = orbit.Orbit(eo, warm["t0"])
+        y0 = np.array(warm["state"])
+        if warm["t0"] < ts[0]:
+            y0 = prev.state_at(y0, np.array(warm["srp"]), ts[0])
+        state, srp, fit_rms, nfev, conv = model.fit(ts, xg, start=(y0, np.array(warm["srp"])))
+        started = "warm"
+        if fit_rms > WARM_MAX_RMS or not conv:    # a manoeuvre, or a bad start: fit from scratch
+            started = "warm-rejected"
+    if started != "warm":
+        state, srp, fit_rms, nfev, conv = model.fit(ts, xg)
 
     # calibration over the measured day: where the broadcast puts the satellite and its clock,
     # relative to the IGS centre of mass and clock
@@ -217,7 +231,10 @@ def predict_sat(job):
                    svacc=URA_BY_DAY[min(int(max(age_days, 0)), len(URA_BY_DAY) - 1)])
         out.append((toe, rec, p))
         toe += STEP
-    return sv, dict(records=out, fit_rms=fit_rms, eph_rms=float(np.median(fits)), srp=list(srp))
+    return sv, dict(records=out, fit_rms=fit_rms, eph_rms=float(np.median(fits)), started=started,
+                    iterations=nfev, converged=conv, seconds=time.time() - t_begin,
+                    fit_state=dict(t0=float(ts[0]), state=[float(v) for v in state],
+                                   srp=[float(v) for v in srp], rms=fit_rms))
 
 
 # ---------------------------------------------------------------- self-check
@@ -249,6 +266,8 @@ def main():
     ap.add_argument("--max-check-m", type=float, default=5.0,
                     help="fail if the self-check's median range error exceeds this")
     ap.add_argument("--jobs", type=int, default=os.cpu_count())
+    ap.add_argument("--warm", help="a previous run's fit-state.json (path or URL) to start the fits "
+                                   "from; anything missing or unreadable falls back to a full fit")
     a = ap.parse_args()
 
     now = dt.datetime.now(dt.timezone.utc)
@@ -278,9 +297,15 @@ def main():
     recs = broadcasts(texts)
     print("broadcasts:", *used, sep="\n  ", file=sys.stderr)
 
+    warm = {}
+    if a.warm:
+        try:
+            warm = {int(k): v for k, v in json.loads(read_text(a.warm))["satellites"].items()}
+        except Exception as e:                    # noqa: BLE001 - a cold start is always possible
+            print("warm start unavailable:", e, file=sys.stderr)
     pred_start = min(v[0][v[3]][0] for v in sp3.values() if v[3].any())
     t_end = pred_start + a.days * 86400
-    jobs = [(sv, d, recs[sv], erp, t_end) for sv, d in sorted(sp3.items())
+    jobs = [(sv, d, recs[sv], erp, t_end, warm.get(sv)) for sv, d in sorted(sp3.items())
             if sv in recs and recs[sv][-1]["health"] == 0]
     with Pool(a.jobs) as pool:
         results = {sv: r for sv, r in pool.map(predict_sat, jobs) if r is not None}
@@ -304,9 +329,18 @@ def main():
         force_model_fit_m=dict(median=float(np.median([r["fit_rms"] for r in results.values()])),
                                worst=float(max(r["fit_rms"] for r in results.values()))),
         self_check_vs_broadcast=check,
-        backtest="range error median/95%: 1.5/2.6 m first half day, 3.2/7.0 m at 2 days, "
-                 "10/54 m at 4.5-5 days (IGS file 2026-10-13 06:00)")
+        backtest="range error median/95%: 0.3/1.1 m first half day, 1.1/5.1 m at 2 days, "
+                 "4.7/17 m at 4.5-5 days, worst 25 m (IGS file 2026-10-13 06:00)")
+    meta["fits"] = {s: sum(1 for r in results.values() if r["started"] == s)
+                    for s in ("cold", "warm", "warm-rejected")}
+    meta["fits"]["not_converged"] = sum(1 for r in results.values() if not r["converged"])
+    meta["fits"]["iterations_median"] = float(np.median([r["iterations"] for r in results.values()]))
+    meta["satellite_seconds"] = dict(median=float(np.median([r["seconds"] for r in results.values()])),
+                                     total=float(sum(r["seconds"] for r in results.values())))
     os.makedirs(a.out, exist_ok=True)
+    with open(os.path.join(a.out, "fit-state.json"), "w") as f:
+        json.dump(dict(made=meta["made"], igs_orbit=sp3_url,
+                       satellites={str(sv): r["fit_state"] for sv, r in results.items()}), f)
     with open(os.path.join(a.out, "gps-7d.bin"), "wb") as f:
         f.write(blob)
     with open(os.path.join(a.out, "gps-7d.json"), "w") as f:
