@@ -23,8 +23,8 @@ from what it was made, and a self-check). A receiver needs, for each satellite, 
 toe is nearest now: casic_eph_select() in the C library picks them.
 
 Backtest (IGS file of 2026-10-13 06:00, against the satellites' broadcasts over the next 4.7
-days): range error, median / 95th percentile, 1.5 / 2.6 m in the first half day, 3.2 / 7.0 m at
-2 days, 10 / 54 m at 4.5-5 days.
+days): range error, median / 95th percentile, 0.3 / 1.1 m in the first half day, 1.1 / 5.1 m at
+2 days, 4.7 / 17 m at 4.5-5 days; worst 25 m.
 """
 import argparse, datetime as dt, gzip, io, json, math, os, re, sys, time, urllib.request
 from multiprocessing import Pool
@@ -44,7 +44,7 @@ STEP = 7200                                   # one ephemeris every 2 h, as the 
 DAYS = 7
 C = 299792458.0
 # 95th-percentile range error by age in the backtest, as metres for the URA index.
-URA_BY_DAY = [3.6, 7.0, 14.0, 29.0, 54.0, 80.0, 110.0]
+URA_BY_DAY = [1.9, 5.1, 8.6, 12.1, 17.2, 25.0, 35.0]
 WARM_MAX_RMS = 6.0       # a warm-started force-model fit worse than this is redone from scratch
 
 
@@ -177,15 +177,13 @@ def predict_sat(job):
         prev = orbit.Orbit(eo, warm["t0"])
         y0 = np.array(warm["state"])
         if warm["t0"] < ts[0]:
-            sol = orbit.solve_ivp(prev._rhs, (warm["t0"], ts[0]), y0, method="DOP853", rtol=1e-11,
-                                  atol=1e-5, args=(np.array(warm["srp"]),))
-            y0 = sol.y[:, -1]
-        state, srp, fit_rms, nfev = model.fit(ts, xg, start=(y0, np.array(warm["srp"])))
+            y0 = prev.state_at(y0, np.array(warm["srp"]), ts[0])
+        state, srp, fit_rms, nfev, conv = model.fit(ts, xg, start=(y0, np.array(warm["srp"])))
         started = "warm"
-        if fit_rms > WARM_MAX_RMS:                # a manoeuvre, or a bad start: fit from scratch
+        if fit_rms > WARM_MAX_RMS or not conv:    # a manoeuvre, or a bad start: fit from scratch
             started = "warm-rejected"
     if started != "warm":
-        state, srp, fit_rms, nfev = model.fit(ts, xg)
+        state, srp, fit_rms, nfev, conv = model.fit(ts, xg)
 
     # calibration over the measured day: where the broadcast puts the satellite and its clock,
     # relative to the IGS centre of mass and clock
@@ -234,7 +232,7 @@ def predict_sat(job):
         out.append((toe, rec, p))
         toe += STEP
     return sv, dict(records=out, fit_rms=fit_rms, eph_rms=float(np.median(fits)), started=started,
-                    nfev=nfev, seconds=time.time() - t_begin,
+                    iterations=nfev, converged=conv, seconds=time.time() - t_begin,
                     fit_state=dict(t0=float(ts[0]), state=[float(v) for v in state],
                                    srp=[float(v) for v in srp], rms=fit_rms))
 
@@ -331,10 +329,12 @@ def main():
         force_model_fit_m=dict(median=float(np.median([r["fit_rms"] for r in results.values()])),
                                worst=float(max(r["fit_rms"] for r in results.values()))),
         self_check_vs_broadcast=check,
-        backtest="range error median/95%: 1.5/2.6 m first half day, 3.2/7.0 m at 2 days, "
-                 "10/54 m at 4.5-5 days (IGS file 2026-10-13 06:00)")
+        backtest="range error median/95%: 0.3/1.1 m first half day, 1.1/5.1 m at 2 days, "
+                 "4.7/17 m at 4.5-5 days, worst 25 m (IGS file 2026-10-13 06:00)")
     meta["fits"] = {s: sum(1 for r in results.values() if r["started"] == s)
                     for s in ("cold", "warm", "warm-rejected")}
+    meta["fits"]["not_converged"] = sum(1 for r in results.values() if not r["converged"])
+    meta["fits"]["iterations_median"] = float(np.median([r["iterations"] for r in results.values()]))
     meta["satellite_seconds"] = dict(median=float(np.median([r["seconds"] for r in results.values()])),
                                      total=float(sum(r["seconds"] for r in results.values())))
     os.makedirs(a.out, exist_ok=True)

@@ -139,7 +139,7 @@ the ~2.6 kB of frames. The test suite checks it byte for byte against CASIC's fi
 fixes as fast with them as with CASIC's file: 5.4, 4.3 and 5.4 s against 5.4, 5.3 and 4.3 s
 ([results](results/2026-10-17-heltec-l76k.md#igs-broadcast-ephemeris-against-casics-file)).
 
-## A week without a network: predicted orbit data
+## Offline rapid cold start for GPS: a week of predicted orbit data
 
 Broadcast orbit data expires after about four hours, and a receiver should refuse it after that.
 So for days away from a network this repository **predicts** it. `tools/predict` takes the newest
@@ -147,40 +147,42 @@ IGS ultra-rapid orbit (24 h measured, 24 h predicted by the IGS), fits a physics
 (Earth's gravity field, Sun, Moon, sunlight pressure with Earth's shadow, IAU Earth orientation
 via ERFA), runs it a week ahead, and fits an ordinary broadcast ephemeris to every 2 h of the
 result, calibrated against the satellites' own broadcasts. A plain algorithm, no machine learning.
+Nothing in it is specific to the L76K: any receiver that accepts ephemeris could use it.
 
-**Published four times a day** by this repository's GitHub Action, to the `agnss-data` branch:
-
-- `https://raw.githubusercontent.com/badriram/l76k-at6558-agnss/agnss-data/gps-7d.bin`: 2,720
-  MSG-GPSEPH frames (32 satellites, one every 2 h, 7 days), 223 kB.
-- `.../agnss-data/gps-7d.json`: when and from what it was made, and a self-check against the
-  satellites' broadcasts (the run fails, and nothing is published, if that check is off).
-
-Download the week file while there is a network; then, each time the receiver needs assisting,
-`casic_eph_select(buf, len, unix_now, 7200, send, ctx)` picks each satellite's frame nearest now
-(2.6 kB, like CASIC's file) to send after AID-INI. `fetch_agnss.py --source predicted` does the
-same from the published file.
+The output, `gps-7d.bin`, is 2,720 MSG-GPSEPH frames (32 satellites, one every 2 h, 7 days),
+223 kB, with `gps-7d.json` saying when and from what it was made and a self-check against the
+satellites' broadcasts. Download it while there is a network; then, each time the receiver needs
+assisting, `casic_eph_select(buf, len, unix_now, 7200, send, ctx)` picks each satellite's frame
+nearest now (2.6 kB, like CASIC's file) to send after AID-INI. `fetch_agnss.py --source predicted`
+does the same from a published file.
 
 **How good it is** ([backtest](results/2026-10-18-prediction-backtest.md): the file made from the
 IGS orbit of 2026-10-13 06:00 UTC, graded against what the satellites actually broadcast over the
-next 4.7 days; range error, the satellite's contribution to position error):
+next 4.7 days; range error is the satellite's contribution to position error):
 
-| days after the IGS orbit | median | 95th percentile | worst |
-| --- | --- | --- | --- |
-| 0-1 (the IGS's own prediction) | 0.3-0.6 m | 1.0-2.5 m | 5.7 m |
-| 1-2 | 2.4-3.2 m | 4.9-7.0 m | 9 m |
-| 2-3 | 4.2-5.3 m | 9.5-14 m | 20 m |
-| 3-4 | 6.6-8.0 m | 21-29 m | 42 m |
-| 4-5 | 9.5-10.6 m | 40-54 m | 66 m |
+| days after the IGS orbit | median | 95th percentile | worst | satellite position, median |
+| --- | --- | --- | --- | --- |
+| 0-1 (the IGS's own prediction) | 0.3-0.5 m | 1.1-1.9 m | 4.1 m | 0.7 m |
+| 1-2 | 0.8-1.1 m | 3.2-5.1 m | 7.0 m | 0.9 m |
+| 2-3 | 1.5-1.9 m | 6.8-8.6 m | 11 m | 1.3-1.6 m |
+| 3-4 | 2.5-3.2 m | 9.9-12 m | 18 m | 2.2-3.1 m |
+| 4-5 | 4.0-4.7 m | 15-17 m | 25 m | 4.1-5.0 m |
 
 A first fix is off by roughly twice the range error until the receiver has decoded the satellites'
-own orbit data (~30 s of tracking), which then replaces the prediction. Days 5-7 are extrapolated,
-not yet graded. **Not yet measured on a receiver**: the frames are ordinary MSG-GPSEPH with a
-current reference time, as accepted from CASIC's file, but the L76K has not been given predicted
-ones. GPS only: the IGS ultra-rapid orbit has no BeiDou.
+own orbit data (~30 s of tracking), which then replaces the prediction. The satellite clocks, not
+the orbits, are now most of the error. Days 5-7 are extrapolated, not yet graded. **Not yet
+measured on a receiver**: the frames are ordinary MSG-GPSEPH with a current reference time, as
+accepted from CASIC's file, but the L76K has not been given predicted ones. GPS only: the IGS
+ultra-rapid orbit has no BeiDou.
 
-Making it takes ~42 s per satellite in Python (about 4 minutes on 14 cores; ~10 minutes on
-GitHub's runners). Nobody else publishes an open equivalent that we could find: u-blox AssistNow
-Offline, MediaTek EPO, Broadcom LTO and Qualcomm XTRA are all closed services.
+**Not published on a schedule yet.** `.github/workflows/predict.yml` would publish to the
+`agnss-data` branch four times a day, but it is disabled: a run takes ~6 minutes on 14 cores here
+and would take far longer on GitHub's 4-core runners. `--warm fit-state.json` starts each fit from
+the previous run's, and lands within 73 mm of a fit from scratch over the whole week, but does not
+yet save time.
+
+Nobody else publishes an open equivalent that we could find: u-blox AssistNow Offline, MediaTek
+EPO, Broadcom LTO and Qualcomm XTRA are all closed services.
 
 ## Credits and sources
 
