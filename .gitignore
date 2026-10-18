@@ -1,3 +1,5 @@
 build/
 *.o
 casic.bin
+out/
+__pycache__/

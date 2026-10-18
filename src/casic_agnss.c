@@ -355,6 +355,64 @@ int casic_bdseph_decode(const uint8_t *p, uint16_t len, casic_bds_eph_t *e)
     return 1;
 }
 
+/* ------------------------------------------------------------------ choosing from many records */
+
+#define GPS_UNIX_OFFSET 315964800      /* 1980-01-06 in Unix seconds */
+#define BDT_GPS_WEEKS 1356             /* BeiDou weeks start 1356 GPS weeks later ... */
+#define BDT_GPS_SECONDS 14             /* ... and BeiDou time runs 14 s behind GPS time */
+
+size_t casic_eph_select(const uint8_t *buf, size_t len, int64_t unix_now, uint32_t max_age_s,
+                        casic_on_frame on_frame, void *ctx)
+{
+    enum { NGPS = 32, NSV = 32 + CASIC_BDS_MAX_SVID };
+    uint32_t off[NSV] = {0}, age[NSV];
+    const int64_t gps_now = unix_now - GPS_UNIX_OFFSET + CASIC_GPS_LEAP_SECONDS;
+    const int64_t bdt_now = gps_now - BDT_GPS_SECONDS - (int64_t)BDT_GPS_WEEKS * 604800;
+    size_t pos = 0, n = 0;
+    casic_frame_t f;
+    int k, r;
+
+    for (k = 0; k < NSV; k++) age[k] = UINT32_MAX;
+    while (pos < len) {
+        size_t at = pos;
+        r = casic_frame_next(buf, len, &pos, &f);
+        if (r <= 0) break;
+        if (f.cls != CASIC_CLS_MSG) continue;
+        {
+            int64_t t, d;
+            int slot;
+            if (f.id == CASIC_ID_MSG_GPSEPH && f.len == CASIC_GPSEPH_LEN) {
+                /* the week is modulo 1024: take the one nearest now */
+                int64_t wk = rd16(f.payload + 50), now_wk = gps_now / 604800;
+                wk += (now_wk - wk + 512) / 1024 * 1024;
+                t = wk * 604800 + (int64_t)rd16(f.payload + 48) * 16 - gps_now;
+                slot = f.payload[68] - 1;
+                if (slot < 0 || slot >= NGPS) continue;
+            } else if (f.id == CASIC_ID_MSG_BDSEPH && f.len == CASIC_BDSEPH_LEN) {
+                t = (int64_t)rd16(f.payload + 64) * 604800 + (int64_t)rd32(f.payload + 60) * 8 - bdt_now;
+                slot = NGPS + f.payload[88] - 1;
+                if (slot < NGPS || slot >= NSV) continue;
+            } else {
+                continue;
+            }
+            d = t < 0 ? -t : t;
+            if (d <= (int64_t)max_age_s && (uint32_t)d < age[slot]) {
+                age[slot] = (uint32_t)d;
+                off[slot] = (uint32_t)at;
+            }
+        }
+    }
+    for (k = 0; k < NSV; k++) {
+        size_t p = off[k];
+        if (age[k] == UINT32_MAX) continue;
+        if (casic_frame_next(buf, len, &p, &f) == 1) {
+            if (on_frame) on_frame(ctx, &f);
+            n++;
+        }
+    }
+    return n;
+}
+
 /* ------------------------------------------------------------------ NMEA */
 
 static const char HEX[] = "0123456789ABCDEF";

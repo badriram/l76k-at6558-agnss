@@ -251,6 +251,18 @@ typedef struct {
 void casic_stream_init(casic_stream_t *s, casic_on_nmea on_nmea, casic_on_frame on_frame, void *ctx);
 void casic_stream_feed(casic_stream_t *s, const uint8_t *data, size_t len);
 
+/* ------------------------------------------------------------------ choosing from many records */
+
+/*
+ * A buffer may hold many ephemerides per satellite: the predicted week file (tools/predict) has one
+ * every 2 h for 7 days. For each GPS and BeiDou satellite, pick the MSG-GPSEPH / MSG-BDSEPH frame
+ * whose reference time (toe) is nearest unix_now, skipping any more than max_age_s away (7200, the
+ * usual validity, is right for a receiver that is about to use them), and call on_frame for each
+ * choice. Other frames are ignored. Returns the number chosen. Uses ~0.6 kB of stack, no heap.
+ */
+size_t casic_eph_select(const uint8_t *buf, size_t len, int64_t unix_now, uint32_t max_age_s,
+                        casic_on_frame on_frame, void *ctx);
+
 #ifdef __cplusplus
 }
 #endif

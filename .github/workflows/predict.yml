@@ -1,0 +1,49 @@
+# Publish a week of predicted GPS orbit data, four times a day, to the agnss-data branch:
+#   https://raw.githubusercontent.com/badriram/l76k-at6558-agnss/agnss-data/gps-7d.bin
+#   https://raw.githubusercontent.com/badriram/l76k-at6558-agnss/agnss-data/gps-7d.json
+# The IGS issues an ultra-rapid orbit at 00, 06, 12 and 18 UTC, about three hours late; each run
+# uses the newest one. The branch holds only the latest files (force-pushed), so it never grows.
+name: predict
+on:
+  schedule:
+    - cron: "30 4,10,16,22 * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: predict
+  cancel-in-progress: false
+jobs:
+  predict:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -r tools/predict/requirements.txt
+      - name: Predict seven days
+        run: python3 tools/predict/predict_agnss.py --out out
+      - name: Publish to agnss-data
+        run: |
+          cd out
+          cp ../LICENSE .
+          cat > README.md <<'MD'
+          # Predicted GPS orbit data for AT6558 / L76K receivers
+
+          `gps-7d.bin`: CASIC MSG-GPSEPH frames, one per GPS satellite every 2 hours for 7 days,
+          made from the newest IGS ultra-rapid orbit by `tools/predict` on the main branch.
+          Pick each satellite's frame nearest now with `casic_eph_select()` and send those after
+          AID-INI. `gps-7d.json` says when and from what it was made, with a self-check against
+          the satellites' own broadcasts. Rebuilt four times a day; this branch holds only the latest.
+
+          Orbit and clock data: International GNSS Service (IGS), via BKG. MIT licence (see LICENSE).
+          MD
+          git init -q -b agnss-data
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Predicted GPS orbit data, $(jq -r .prediction_starts gps-7d.json)"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" agnss-data

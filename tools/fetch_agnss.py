@@ -6,7 +6,7 @@
     python3 tools/fetch_agnss.py --source igs casic.bin     # IGS broadcast ephemeris only
     python3 tools/fetch_agnss.py --rinex BRDC.rnx casic.bin # any RINEX 3 navigation file or URL
 
-Sources, tried in the order given (default: casic, then igs):
+Sources, tried in the order given (default: casic, then igs, then predicted):
 
   casic  CASIC's AGNSS file as republished by Espruino: 32 MSG-GPSEPH and a MSG-GPSION, already
          framed. Small (~3.6 kB of base64). One mirror, run by a hobby project.
@@ -15,6 +15,9 @@ Sources, tried in the order given (default: casic, then igs):
          gzipped per day. For each satellite, the ephemeris nearest now is encoded: GPS as
          MSG-GPSEPH and BeiDou C01-C37 as MSG-BDSEPH (--gps-only to leave BeiDou out). The
          same files are at NASA CDDIS (needs an Earthdata login) and IGN; pass one with --rinex.
+  predicted  This repository's own week-ahead GPS prediction (tools/predict), published by its
+         GitHub Action to the agnss-data branch four times a day. Picks each satellite's record
+         nearest now. Download gps-7d.bin itself to carry a week of data offline.
 
 Both carry the satellites' own broadcast data, so they agree: checked field by field, every orbit
 and clock term of CASIC's file equals the IGS record with the same toe and IODC, and the frames
@@ -24,6 +27,7 @@ The "reserved" first word is the sum of the payload's other words, filled in her
 import argparse, base64, datetime as dt, gzip, io, math, struct, sys, urllib.request
 
 CASIC_URL = "https://www.espruino.com/agps/casic.base64"
+PREDICTED_URL = "https://raw.githubusercontent.com/badriram/l76k-at6558-agnss/agnss-data/gps-7d.bin"
 IGS_URL = "https://igs.bkg.bund.de/root_ftp/IGS/BRDC/{y}/{doy:03d}/BRDC00WRD_S_{y}{doy:03d}0000_01D_MN.rnx.gz"
 GPS_EPOCH = dt.datetime(1980, 1, 6, tzinfo=dt.timezone.utc)
 LEAP = 18
@@ -227,14 +231,48 @@ def from_igs(now, systems):
     raise RuntimeError("no usable IGS file")
 
 
-SOURCES = {"casic": from_casic, "igs": from_igs}
+def select_nearest(frames, now, max_age_s=FIT_S):
+    """Each satellite's MSG-GPSEPH / MSG-BDSEPH frame with toe nearest now (as casic_eph_select)."""
+    gps_now = (now - GPS_EPOCH).total_seconds() + LEAP
+    bdt_now = gps_now - BDT_OFFSET_S - BDT_WEEK_OFFSET * 7 * 86400
+    best, j = {}, 0
+    while j + 6 <= len(frames):
+        ln = frames[j + 2] | frames[j + 3] << 8
+        f, p = frames[j:j + 10 + ln], frames[j + 6:j + 6 + ln]
+        j += 10 + ln
+        if (f[4], f[5]) == (0x08, 0x07) and ln == 72:
+            wk = struct.unpack_from("<H", p, 50)[0]
+            now_wk = int(gps_now // (7 * 86400))
+            wk += (now_wk - wk + 512) // 1024 * 1024
+            age, key = abs(wk * 7 * 86400 + struct.unpack_from("<H", p, 48)[0] * 16 - gps_now), ("G", p[68])
+        elif (f[4], f[5]) == (0x08, 0x02) and ln == 92:
+            t = struct.unpack_from("<H", p, 64)[0] * 7 * 86400 + struct.unpack_from("<I", p, 60)[0] * 8
+            age, key = abs(t - bdt_now), ("C", p[88])
+        else:
+            continue
+        if age <= max_age_s and (key not in best or age < best[key][0]):
+            best[key] = (age, f)
+    return b"".join(best[k][1] for k in sorted(best))
+
+
+def from_predicted(now, systems):
+    # A week of GPS ephemerides predicted from IGS ultra-rapid orbits by tools/predict, published
+    # four times a day by this repository's GitHub Action. Valid 7 days after it was made.
+    week = urllib.request.urlopen(PREDICTED_URL, timeout=60).read()
+    out = select_nearest(week, now)
+    if not out:
+        raise ValueError("the predicted file has nothing within 2 h of now (more than 7 days old?)")
+    return out
+
+
+SOURCES = {"casic": from_casic, "igs": from_igs, "predicted": from_predicted}
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("out", nargs="?", default="casic.bin")
     ap.add_argument("--source", action="append", choices=sorted(SOURCES),
-                    help="try this source (repeat for a fallback order; default: casic, then igs)")
+                    help="try this source (repeat for a fallback order; default: casic, then igs, then predicted)")
     ap.add_argument("--rinex", help="encode this RINEX 3 navigation file (path or URL) instead")
     ap.add_argument("--at", help="encode for this UTC time (ISO 8601) instead of now")
     ap.add_argument("--gps-only", action="store_true", help="leave out BeiDou (RINEX sources only)")
@@ -247,7 +285,7 @@ def main():
         frames, used = encode_rinex(read_rinex(a.rinex), now, systems), "rinex"
     else:
         frames = used = None
-        for name in a.source or ["casic", "igs"]:
+        for name in a.source or ["casic", "igs", "predicted"]:
             try:
                 frames, used = SOURCES[name](now, systems), name
                 break

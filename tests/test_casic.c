@@ -243,6 +243,51 @@ static void test_bdseph(void)
     CHECK(casic_bdseph_frame(&e, frame, sizeof frame) == 0);
 }
 
+struct picks { int n; uint8_t svid[8]; uint32_t toe[8]; };
+static void on_pick(void *ctx, const casic_frame_t *f)
+{
+    struct picks *p = ctx;
+    if (p->n < 8) {
+        p->svid[p->n] = f->id == CASIC_ID_MSG_GPSEPH ? f->payload[68] : (uint8_t)(100 + f->payload[88]);
+        p->toe[p->n] = f->id == CASIC_ID_MSG_GPSEPH ? (uint32_t)(f->payload[48] | f->payload[49] << 8) * 16u
+                                                   : (uint32_t)le32(f->payload + 60) * 8u;
+        p->n++;
+    }
+}
+
+static void test_select(void)
+{
+    static uint8_t buf[1200];
+    casic_gps_eph_t g;
+    casic_bds_eph_t b;
+    struct picks p;
+    size_t n = 0;
+    int k;
+    /* GPS PRN 8 at toe 590400, 597600 and 604784 s of week 2440; BeiDou C35 at 518400 s, week 1084 */
+    static const double toes[3] = {590400.0, 597600.0, 604784.0};
+    for (k = 0; k < 3; k++) {
+        rinex_g08(&g);
+        g.toe = g.toc = toes[k];
+        n += casic_gpseph_frame(&g, buf + n, sizeof buf - n);
+    }
+    rinex_c35(&b);
+    n += casic_bdseph_frame(&b, buf + n, sizeof buf - n);
+
+    /* 2026-10-17 22:30 UTC = GPS week 2440, 599418 s: PRN 8's 597600 record is nearest. BeiDou's
+     * record (BDT 518400 s = GPS 518414 s) is 22.5 h away: too old at 7200 s, chosen at 2 days. */
+    memset(&p, 0, sizeof p);
+    CHECK(casic_eph_select(buf, n, 1792276200, 7200, on_pick, &p) == 1);
+    CHECK(p.n == 1 && p.svid[0] == 8 && p.toe[0] == 597600);
+    memset(&p, 0, sizeof p);
+    CHECK(casic_eph_select(buf, n, 1792276200, 172800, on_pick, &p) == 2);
+    CHECK(p.svid[0] == 8 && p.svid[1] == 135 && p.toe[1] == 518400);
+    /* 2026-10-17 23:50 UTC: the cutover record at 604784 s is nearest now */
+    memset(&p, 0, sizeof p);
+    CHECK(casic_eph_select(buf, n, 1792281000, 7200, on_pick, &p) == 1 && p.toe[0] == 604784);
+    /* a day later nothing is within 2 h */
+    CHECK(casic_eph_select(buf, n, 1792276200 + 86400, 7200, NULL, NULL) == 0);
+}
+
 struct counts { int nmea, frames, gga, acks; };
 static void on_nmea(void *ctx, const char *s, size_t n)
 {
@@ -296,6 +341,7 @@ int main(void)
     test_agnss_file();
     test_gpseph();
     test_bdseph();
+    test_select();
     test_stream();
     printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

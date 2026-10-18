@@ -37,12 +37,13 @@ More findings, all on the same receiver, in [`results/`](results/2026-10-17-helt
 
 | path | what |
 | --- | --- |
-| `include/casic_agnss.h`, `src/casic_agnss.c` | **the C library**: portable C99, no allocation, no OS, no stdio, byte order explicit. CASIC framing and checksum, AID-INI, CASIC AGNSS file parsing, MSG-GPSEPH and MSG-BDSEPH encoders and decoders for RINEX-sourced ephemeris, CFG-MSG, ACK decoding, NMEA commands, a GGA/RMC parser, GPS time, and a stream splitter for the receiver's mixed NMEA-and-binary output |
+| `include/casic_agnss.h`, `src/casic_agnss.c` | **the C library**: portable C99, no allocation, no OS, no stdio, byte order explicit. CASIC framing and checksum, AID-INI, CASIC AGNSS file parsing, MSG-GPSEPH and MSG-BDSEPH encoders and decoders for RINEX-sourced ephemeris, `casic_eph_select` to pick each satellite's record for now from many, CFG-MSG, ACK decoding, NMEA commands, a GGA/RMC parser, GPS time, and a stream splitter for the receiver's mixed NMEA-and-binary output |
 | `examples/assist_cold_start.c` | the assisted cold start against four platform hooks (UART write/read, milliseconds, sleep): fill them in for Zephyr, ESP-IDF, Arduino or anything else |
 | `tests/test_casic.c` | host tests (`make test`), against Quectel's worked examples and independently computed values |
 | `micropython/heltec_v4_l76k/assisted_cold_start.py` | the measurement above, on a Heltec WiFi LoRa 32 V4 with its L76K module; logs to `/gnss_assist_log.txt` on the board |
 | `micropython/heltec_v4_l76k/hello.py` | power the module and print its NMEA, to check the wiring |
-| `tools/fetch_agnss.py` | fetch orbit data from CASIC's file or the IGS broadcast ephemeris (falling back from one to the other), check every frame's checksum, write the raw frames (`casic.bin`) |
+| `tools/fetch_agnss.py` | fetch orbit data from CASIC's file, the IGS broadcast ephemeris or this repository's predicted week (falling back in that order), check every frame's checksum, write the raw frames (`casic.bin`) |
+| `tools/predict/` | predict GPS orbit data a week ahead from IGS ultra-rapid orbits (`predict_agnss.py`; needs numpy, scipy and pyerfa); run four times a day by `.github/workflows/predict.yml` |
 | `results/` | measurements, with conditions |
 
 ## Using the library
@@ -138,6 +139,49 @@ the ~2.6 kB of frames. The test suite checks it byte for byte against CASIC's fi
 fixes as fast with them as with CASIC's file: 5.4, 4.3 and 5.4 s against 5.4, 5.3 and 4.3 s
 ([results](results/2026-10-17-heltec-l76k.md#igs-broadcast-ephemeris-against-casics-file)).
 
+## A week without a network: predicted orbit data
+
+Broadcast orbit data expires after about four hours, and a receiver should refuse it after that.
+So for days away from a network this repository **predicts** it. `tools/predict` takes the newest
+IGS ultra-rapid orbit (24 h measured, 24 h predicted by the IGS), fits a physics model to it
+(Earth's gravity field, Sun, Moon, sunlight pressure with Earth's shadow, IAU Earth orientation
+via ERFA), runs it a week ahead, and fits an ordinary broadcast ephemeris to every 2 h of the
+result, calibrated against the satellites' own broadcasts. A plain algorithm, no machine learning.
+
+**Published four times a day** by this repository's GitHub Action, to the `agnss-data` branch:
+
+- `https://raw.githubusercontent.com/badriram/l76k-at6558-agnss/agnss-data/gps-7d.bin`: 2,720
+  MSG-GPSEPH frames (32 satellites, one every 2 h, 7 days), 223 kB.
+- `.../agnss-data/gps-7d.json`: when and from what it was made, and a self-check against the
+  satellites' broadcasts (the run fails, and nothing is published, if that check is off).
+
+Download the week file while there is a network; then, each time the receiver needs assisting,
+`casic_eph_select(buf, len, unix_now, 7200, send, ctx)` picks each satellite's frame nearest now
+(2.6 kB, like CASIC's file) to send after AID-INI. `fetch_agnss.py --source predicted` does the
+same from the published file.
+
+**How good it is** ([backtest](results/2026-10-18-prediction-backtest.md): the file made from the
+IGS orbit of 2026-10-13 06:00 UTC, graded against what the satellites actually broadcast over the
+next 4.7 days; range error, the satellite's contribution to position error):
+
+| days after the IGS orbit | median | 95th percentile | worst |
+| --- | --- | --- | --- |
+| 0-1 (the IGS's own prediction) | 0.3-0.6 m | 1.0-2.5 m | 5.7 m |
+| 1-2 | 2.4-3.2 m | 4.9-7.0 m | 9 m |
+| 2-3 | 4.2-5.3 m | 9.5-14 m | 20 m |
+| 3-4 | 6.6-8.0 m | 21-29 m | 42 m |
+| 4-5 | 9.5-10.6 m | 40-54 m | 66 m |
+
+A first fix is off by roughly twice the range error until the receiver has decoded the satellites'
+own orbit data (~30 s of tracking), which then replaces the prediction. Days 5-7 are extrapolated,
+not yet graded. **Not yet measured on a receiver**: the frames are ordinary MSG-GPSEPH with a
+current reference time, as accepted from CASIC's file, but the L76K has not been given predicted
+ones. GPS only: the IGS ultra-rapid orbit has no BeiDou.
+
+Making it takes ~42 s per satellite in Python (about 4 minutes on 14 cores; ~10 minutes on
+GitHub's runners). Nobody else publishes an open equivalent that we could find: u-blox AssistNow
+Offline, MediaTek EPO, Broadcom LTO and Qualcomm XTRA are all closed services.
+
 ## Credits and sources
 
 - [furble](https://github.com/MaxRink/furble) (MIT): the checksum correction, AID-INI from a cached
@@ -149,7 +193,11 @@ fixes as fast with them as with CASIC's file: 5.4, 4.3 and 5.4 s against 5.4, 5.
   ([discussion](https://github.com/orgs/espruino/discussions/7026)).
 - [openLuat](https://github.com/openLuat/LuatOS) serves a CASIC file with BeiDou, which confirmed
   the MSG-BDSEPH encoding.
-- [IGS](https://igs.org/) and [BKG](https://igs.bkg.bund.de/) for the merged broadcast ephemeris;
+- [IGS](https://igs.org/) and [BKG](https://igs.bkg.bund.de/) for the merged broadcast ephemeris,
+  the ultra-rapid orbits and Earth rotation parameters the prediction starts from;
+- [ERFA](https://github.com/liberfa/erfa) (pyerfa), the open copy of the IAU's SOFA routines, for
+  Earth orientation, the Sun and the Moon; Montenbruck & Gill, *Satellite Orbits*, for the gravity
+  field recursion; EGM2008 coefficients;
   [NASA CDDIS](https://cddis.nasa.gov/Data_and_Derived_Products/GNSS/broadcast_ephemeris_data.html)
   archives the same files.
 - Quectel, *L76K GNSS Protocol Specification* V1.1; Hangzhou Zhongke Microelectronics, *CASIC
